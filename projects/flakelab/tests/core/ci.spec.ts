@@ -143,9 +143,13 @@ test("GitHub integration is least-privilege and guards secret-backed diagnosis",
     }),
     permissions: z.object({ contents: z.literal("read") }),
     jobs: z.object({
+      quality: z.object({
+        "runs-on": z.literal("blacksmith-4vcpu-ubuntu-2404"),
+      }),
       diagnosis: z.object({
         if: z.string().includes("head.repo.full_name == github.repository"),
         environment: z.literal("flakelab"),
+        "runs-on": z.literal("blacksmith-4vcpu-ubuntu-2404"),
       }),
     }),
   })
@@ -155,6 +159,8 @@ test("GitHub integration is least-privilege and guards secret-backed diagnosis",
 
   expect(action.runs.steps.some((step) => step.uses === "actions/upload-artifact@v7.0.1"))
     .toBe(true)
+  expect(workflow.jobs.quality["runs-on"]).toBe("blacksmith-4vcpu-ubuntu-2404")
+  expect(workflow.jobs.diagnosis["runs-on"]).toBe("blacksmith-4vcpu-ubuntu-2404")
   expect(workflow.permissions).toEqual({ contents: "read" })
   expect(workflowSource).not.toContain("pull_request_target")
 })
