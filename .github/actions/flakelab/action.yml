@@ -1,0 +1,155 @@
+name: FlakeLab diagnosis
+description: Select changed Playwright tests and produce a causal FlakeLab evidence bundle.
+
+inputs:
+  project-directory:
+    description: Repository-relative directory containing the FlakeLab package.
+    required: false
+    default: projects/flakelab
+  base:
+    description: Trusted base revision for changed-test selection.
+    required: true
+  head:
+    description: Head revision for changed-test selection.
+    required: true
+  groq-api-key:
+    description: Groq credential used by the bounded investigator.
+    required: true
+  solari-api-key:
+    description: Solari credential used by isolated proof execution.
+    required: true
+
+outputs:
+  artifact-url:
+    description: URL of the uploaded portable evidence bundle, when a test was selected.
+    value: ${{ steps.artifact.outputs.artifact-url }}
+  selected-test:
+    description: First changed or affected Playwright test selected for bounded diagnosis.
+    value: ${{ steps.select.outputs.first_test }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned pnpm and Node.js
+      uses: pnpm/setup@v2.1.0
+      with:
+        version: 11.6.0
+        runtime: node@22.14.0
+        cache: true
+        cache-dependency-path: ${{ inputs.project-directory }}/pnpm-lock.yaml
+        package-json-file: ${{ inputs.project-directory }}/package.json
+        working-directory: ${{ inputs.project-directory }}
+        install: false
+
+    - name: Install locked dependencies
+      shell: bash
+      env:
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+      run: pnpm --dir "$FLAKELAB_PROJECT" install --frozen-lockfile
+
+    - name: Install Playwright Chromium
+      shell: bash
+      env:
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+      run: pnpm --dir "$FLAKELAB_PROJECT" exec playwright install --with-deps chromium
+
+    - name: Select changed tests
+      id: select
+      shell: bash
+      env:
+        FLAKELAB_BASE: ${{ inputs.base }}
+        FLAKELAB_HEAD: ${{ inputs.head }}
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+      run: >-
+        pnpm --dir "$FLAKELAB_PROJECT" ci:select --
+        --base "$FLAKELAB_BASE"
+        --head "$FLAKELAB_HEAD"
+
+    - name: Discover deterministic trigger
+      if: steps.select.outputs.has_tests == 'true'
+      shell: bash
+      env:
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+        FLAKELAB_TEST: ${{ steps.select.outputs.first_test }}
+      run: >-
+        pnpm --dir "$FLAKELAB_PROJECT" flakelab discover "$FLAKELAB_TEST"
+        --trials 4 --concurrency 4 --max-delay 250 --min-rate 0.7
+        --output flakelab.repro.yaml
+
+    - name: Run bounded AI investigation
+      if: steps.select.outputs.has_tests == 'true'
+      shell: bash
+      env:
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+        FLAKELAB_TEST: ${{ steps.select.outputs.first_test }}
+        GROQ_API_KEY: ${{ inputs.groq-api-key }}
+      run: >-
+        pnpm --dir "$FLAKELAB_PROJECT" flakelab investigate "$FLAKELAB_TEST"
+        --trials 4 --concurrency 4 --max-trials 12 --max-cost 0.25
+        --report flakelab.investigation.json
+
+    - name: Generate and prove candidate repair
+      if: steps.select.outputs.has_tests == 'true'
+      id: repair
+      continue-on-error: true
+      shell: bash
+      env:
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+        GROQ_API_KEY: ${{ inputs.groq-api-key }}
+        SOLARI_API_KEY: ${{ inputs.solari-api-key }}
+      run: >-
+        pnpm --dir "$FLAKELAB_PROJECT" flakelab repair flakelab.investigation.json
+        --reproducer flakelab.repro.yaml
+        --patch candidate.diff
+        --proof flakelab.proof.json
+
+    - name: Bundle portable report
+      if: steps.select.outputs.has_tests == 'true'
+      shell: bash
+      env:
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+      run: >-
+        pnpm --dir "$FLAKELAB_PROJECT" flakelab report flakelab.investigation.json
+        --reproducer flakelab.repro.yaml
+        --proof flakelab.proof.json
+        --patch candidate.diff
+        --html flakelab.report.html
+
+    - name: Upload evidence bundle
+      if: steps.select.outputs.has_tests == 'true'
+      id: artifact
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: flakelab-${{ github.run_id }}
+        retention-days: 7
+        if-no-files-found: error
+        include-hidden-files: true
+        path: |
+          ${{ inputs.project-directory }}/flakelab.report.html
+          ${{ inputs.project-directory }}/flakelab.investigation.json
+          ${{ inputs.project-directory }}/flakelab.repro.yaml
+          ${{ inputs.project-directory }}/flakelab.repro.discovery.json
+          ${{ inputs.project-directory }}/flakelab.proof.json
+          ${{ inputs.project-directory }}/candidate.diff
+          ${{ inputs.project-directory }}/.flakelab/changed-tests.json
+
+    - name: Write GitHub job summary
+      if: steps.select.outputs.has_tests == 'true'
+      shell: bash
+      env:
+        FLAKELAB_ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+        FLAKELAB_PROJECT: ${{ inputs.project-directory }}
+      run: pnpm --dir "$FLAKELAB_PROJECT" ci:summary
+
+    - name: Enforce proof result after evidence upload
+      if: steps.select.outputs.has_tests == 'true' && steps.repair.outcome == 'failure'
+      shell: bash
+      run: |
+        echo 'FlakeLab rejected or could not prove the candidate repair.' >&2
+        exit 1
+
+    - name: Report no affected browser tests
+      if: steps.select.outputs.has_tests != 'true'
+      shell: bash
+      run: |
+        printf '%s\n' '## FlakeLab' '' 'No changed or affected browser tests were selected.' >> "$GITHUB_STEP_SUMMARY"

@@ -6,3 +6,14 @@ __pycache__/
 .venv/
 venv/
 screenshot.png
+.flakelab/
+dist/
+coverage/
+playwright-report/
+test-results/
+projects/flakelab/candidate.diff
+projects/flakelab/flakelab.investigation.json
+projects/flakelab/flakelab.proof.json
+projects/flakelab/flakelab.report.html
+projects/flakelab/flakelab.repro.discovery.json
+projects/flakelab/flakelab.repro.yaml

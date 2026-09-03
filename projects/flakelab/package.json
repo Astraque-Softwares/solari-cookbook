@@ -1,0 +1,51 @@
+{
+  "name": "@flakelab/cli",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@11.6.0",
+  "bin": {
+    "flakelab": "./src/cli.ts"
+  },
+  "scripts": {
+    "ci:select": "tsx src/ci/select-command.ts",
+    "ci:summary": "tsx src/ci/summary-command.ts",
+    "flakelab": "tsx src/cli.ts",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix --max-warnings=0",
+    "test": "playwright test --pass-with-no-tests",
+    "test:headed": "playwright test --headed",
+    "typecheck": "tsc --noEmit",
+    "quality": "pnpm typecheck && pnpm lint && pnpm test",
+    "verify:solari-parallel": "tsx src/verify-solari-parallel.ts",
+    "verify:solari": "tsx src/verify-solari.ts",
+    "verify:bisect": "tsx src/verify-bisect.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/groq": "^4.0.35",
+    "@solarisdk/browser": "^0.1.2",
+    "@solarisdk/sandbox": "^0.1.2",
+    "ai": "^7.0.87",
+    "diff": "^9.0.0",
+    "dotenv": "^17.2.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "recharts": "^3.10.1",
+    "undici": "^7.29.0",
+    "vite": "^8.2.2",
+    "yaml": "^2.9.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@hono/eslint-config": "^2.1.1",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.18.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "eslint": "^10.9.1",
+    "eslint-plugin-sonarjs": "^4.2.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.69.0"
+  }
+}

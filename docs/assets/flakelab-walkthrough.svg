@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title description">
+  <title id="title">FlakeLab causal debugging walkthrough</title>
+  <desc id="description">An animated four-stage walkthrough from intermittent failure to trigger, candidate, and proof.</desc>
+  <style>
+    .background { fill: #071015; }
+    .panel { fill: #0d1b22; stroke: #1f3b46; stroke-width: 2; }
+    .muted { fill: #88a0aa; font: 22px ui-monospace, monospace; }
+    .label { fill: #d7e7ed; font: 700 25px ui-sans-serif, sans-serif; }
+    .title { fill: #f5fbfd; font: 800 50px ui-sans-serif, sans-serif; letter-spacing: -1px; }
+    .accent { fill: #48e0b5; }
+    .warning { fill: #ffb454; }
+    .failure { fill: #ff6b7a; }
+    .line { stroke: #264955; stroke-width: 8; stroke-linecap: round; }
+    .progress { stroke: #48e0b5; stroke-width: 8; stroke-linecap: round; stroke-dasharray: 970; animation: progress 12s linear infinite; }
+    .stage { opacity: .18; }
+    .one { animation: stage-one 12s infinite; }
+    .two { animation: stage-two 12s infinite; }
+    .three { animation: stage-three 12s infinite; }
+    .four { animation: stage-four 12s infinite; }
+    @keyframes progress { from { stroke-dashoffset: 970; } to { stroke-dashoffset: 0; } }
+    @keyframes stage-one { 0%, 22% { opacity: 1; } 25%, 100% { opacity: .18; } }
+    @keyframes stage-two { 0%, 22%, 48%, 100% { opacity: .18; } 25%, 47% { opacity: 1; } }
+    @keyframes stage-three { 0%, 47%, 73%, 100% { opacity: .18; } 50%, 72% { opacity: 1; } }
+    @keyframes stage-four { 0%, 72%, 100% { opacity: .18; } 75%, 98% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .progress, .stage { animation: none; } .stage { opacity: 1; } }
+  </style>
+  <rect class="background" width="1200" height="675" rx="28"/>
+  <circle class="accent" cx="74" cy="71" r="19"/>
+  <text class="title" x="108" y="88">FlakeLab</text>
+  <text class="muted" x="108" y="123">causal debugging, measured</text>
+  <line class="line" x1="115" y1="182" x2="1085" y2="182"/>
+  <line class="progress" x1="115" y1="182" x2="1085" y2="182"/>
+
+  <g class="stage one">
+    <rect class="panel" x="55" y="225" width="255" height="330" rx="20"/>
+    <text class="failure" x="82" y="277" font-family="ui-monospace, monospace" font-size="22">01 · OBSERVE</text>
+    <text class="label" x="82" y="326">Intermittent failure</text>
+    <text class="muted" x="82" y="372">baseline 0/4</text>
+    <text class="muted" x="82" y="407">delayed 4/4</text>
+    <circle class="accent" cx="94" cy="470" r="10"/>
+    <circle class="accent" cx="132" cy="470" r="10"/>
+    <circle class="failure" cx="170" cy="470" r="10"/>
+    <circle class="accent" cx="208" cy="470" r="10"/>
+  </g>
+
+  <g class="stage two">
+    <rect class="panel" x="335" y="225" width="255" height="330" rx="20"/>
+    <text class="warning" x="362" y="277" font-family="ui-monospace, monospace" font-size="22">02 · INTERVENE</text>
+    <text class="label" x="362" y="326">Minimize trigger</text>
+    <text class="muted" x="362" y="372">250 ms</text>
+    <text class="muted" x="362" y="407">→ 125 ms</text>
+    <rect class="accent" x="362" y="454" width="170" height="18" rx="9"/>
+    <rect class="warning" x="362" y="491" width="86" height="18" rx="9"/>
+  </g>
+
+  <g class="stage three">
+    <rect class="panel" x="615" y="225" width="255" height="330" rx="20"/>
+    <text class="accent" x="642" y="277" font-family="ui-monospace, monospace" font-size="22">03 · REPAIR</text>
+    <text class="label" x="642" y="326">Bounded candidate</text>
+    <text class="muted" x="642" y="372">application only</text>
+    <text class="muted" x="642" y="407">working tree clean</text>
+    <text class="accent" x="642" y="475" font-family="ui-monospace, monospace" font-size="24">+ exact edit</text>
+    <text class="failure" x="642" y="510" font-family="ui-monospace, monospace" font-size="24">− race gate</text>
+  </g>
+
+  <g class="stage four">
+    <rect class="panel" x="895" y="225" width="255" height="330" rx="20"/>
+    <text class="accent" x="922" y="277" font-family="ui-monospace, monospace" font-size="22">04 · PROVE</text>
+    <text class="label" x="922" y="326">Hostile + control</text>
+    <text class="muted" x="922" y="372">hostile 4/4 ✓</text>
+    <text class="muted" x="922" y="407">control  4/4 ✓</text>
+    <text class="muted" x="922" y="442">nearby   2/2 ✓</text>
+    <circle class="accent" cx="1022" cy="497" r="34"/>
+    <path d="M1005 497l12 12 24-28" fill="none" stroke="#071015" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text class="muted" x="55" y="625">AI proposes · deterministic experiments decide · Solari isolates</text>
+</svg>

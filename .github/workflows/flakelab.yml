@@ -1,0 +1,91 @@
+name: FlakeLab
+
+on:
+  pull_request:
+    paths:
+      - projects/flakelab/**
+      - .github/actions/flakelab/**
+      - .github/workflows/flakelab.yml
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Good/base Git revision
+        required: true
+        default: HEAD~1
+      head:
+        description: Head Git revision
+        required: true
+        default: HEAD
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flakelab-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Local quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pinned pnpm and Node.js
+        uses: pnpm/setup@v2.1.0
+        with:
+          version: 11.6.0
+          runtime: node@22.14.0
+          cache: true
+          cache-dependency-path: projects/flakelab/pnpm-lock.yaml
+          package-json-file: projects/flakelab/package.json
+          working-directory: projects/flakelab
+          install: false
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: projects/flakelab
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: projects/flakelab
+
+      - name: Run typecheck, lint, and Playwright tests
+        run: pnpm quality
+        working-directory: projects/flakelab
+
+  diagnosis:
+    name: Causal flake diagnosis
+    needs: quality
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: flakelab
+    steps:
+      - name: Checkout complete history without persisted credentials
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Diagnose changed Playwright test
+        id: flakelab
+        uses: ./.github/actions/flakelab
+        with:
+          base: ${{ github.event.pull_request.base.sha || inputs.base }}
+          head: ${{ github.event.pull_request.head.sha || inputs.head }}
+          groq-api-key: ${{ secrets.GROQ_API_KEY }}
+          solari-api-key: ${{ secrets.SOLARI_API_KEY }}
+
+      - name: Link evidence bundle
+        if: steps.flakelab.outputs.artifact-url != ''
+        env:
+          FLAKELAB_ARTIFACT_URL: ${{ steps.flakelab.outputs.artifact-url }}
+        run: |
+          echo "Evidence bundle: $FLAKELAB_ARTIFACT_URL"

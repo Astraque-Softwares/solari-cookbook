@@ -1,0 +1,28 @@
+diff --git a/projects/flakelab/tests/support/checkout-server.ts b/projects/flakelab/tests/support/checkout-server.ts
+--- a/projects/flakelab/tests/support/checkout-server.ts
++++ b/projects/flakelab/tests/support/checkout-server.ts
+@@ -14,10 +14,14 @@
+       document.querySelector('button').addEventListener('click', async () => {
+         const status = document.querySelector('[role=status]')
+         status.textContent = 'Processing'
++        let expired = false
+         const deadline = setTimeout(() => {
++          expired = true
+           status.textContent = 'Checkout timed out'
+         }, 100)
+         await fetch('/api/checkout', { method: 'POST' })
+         clearTimeout(deadline)
+-        status.textContent = 'Checkout complete'
++        if (!expired) status.textContent = 'Checkout complete'
+       })
+diff --git a/projects/flakelab/tests/fixtures/flaky-checkout.spec.ts b/projects/flakelab/tests/fixtures/flaky-checkout.spec.ts
+--- a/projects/flakelab/tests/fixtures/flaky-checkout.spec.ts
++++ b/projects/flakelab/tests/fixtures/flaky-checkout.spec.ts
+@@ -14,6 +14,7 @@
+ })
+ 
+ test("checkout completes before the product deadline", async ({ page }) => {
++  // This behavior test intentionally exercises the new product deadline.
+   await page.goto(checkout.url)
+   await page.getByRole("button", { name: "Place order" }).click()
+   await expect(page.getByRole("status")).toHaveText("Checkout complete", { timeout: 750 })

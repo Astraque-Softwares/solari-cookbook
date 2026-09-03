@@ -1,91 +1,87 @@
-# Solari Cookbook
+# FlakeLab
 
-Short, runnable examples for [Solari](https://getsolari.com) — cloud browsers,
-sandboxes, and desktops behind one API key.
+> Turn “it only fails sometimes” into an exact trigger, a portable reproducer, and proof
+> that the fix works.
 
-Every example in this repo is a complete program you can run in under a minute.
-They are deliberately small: one idea each, no framework, no scaffolding to read
-past. Copy one into your project and change the parts you care about.
+FlakeLab is an AI debugging scientist for flaky Playwright tests. It does not stop at rerunning
+a test or summarizing a trace. It forms competing hypotheses, changes one condition at a time,
+measures the resulting failure probability, minimizes the trigger, proposes a bounded patch, and
+proves that patch in disposable Solari microVMs.
 
-## Examples
+![Animated FlakeLab walkthrough](docs/assets/flakelab-walkthrough.svg)
 
-### Cloud browser
-
-| Example | Language | What it shows |
-| --- | --- | --- |
-| [browser-quickstart-ts](examples/browser-quickstart-ts) | TypeScript | Launch a browser, open a page, read it |
-| [browser-quickstart-py](examples/browser-quickstart-py) | Python | Launch a browser, open a page, read it |
-| [browser-stealth-proxy-ts](examples/browser-stealth-proxy-ts) | TypeScript | Stealth mode + residential proxy egress |
-| [browser-profiles-ts](examples/browser-profiles-ts) | TypeScript | Log in once, reuse the session forever |
-| [browser-session-recording-py](examples/browser-session-recording-py) | Python | Record a session, download the replay |
-
-### Sandbox
-
-| Example | Language | What it shows |
-| --- | --- | --- |
-| [sandbox-quickstart-ts](examples/sandbox-quickstart-ts) | TypeScript | Run a command, write and read files |
-| [sandbox-code-interpreter-py](examples/sandbox-code-interpreter-py) | Python | Stateful Python kernel for agent loops |
-| [sandbox-port-preview-ts](examples/sandbox-port-preview-ts) | TypeScript | Expose a server in the VM on a public URL |
-
-### Desktop
-
-| Example | Language | What it shows |
-| --- | --- | --- |
-| [desktop-computer-use-py](examples/desktop-computer-use-py) | Python | Screenshot, click, and type on a Linux GUI |
-
-## Running an example
-
-Each directory is self-contained.
+## The two-minute version
 
 ```bash
-git clone https://github.com/solari-sdk/solari-cookbook.git
-cd solari-cookbook/examples/browser-quickstart-ts
+cd projects/flakelab
+pnpm install --frozen-lockfile
 
-npm install                          # or: pip install -r requirements.txt
-export SOLARI_API_KEY=slr_live_...   # grab one at console.getsolari.com
-npm start                            # or: python main.py
+pnpm flakelab investigate tests/fixtures/flaky-checkout.spec.ts \
+  --trials 4 --concurrency 4 --max-delay 125
+
+pnpm flakelab repair flakelab.investigation.json \
+  --reproducer flakelab.repro.yaml
+
+pnpm flakelab report flakelab.investigation.json \
+  --reproducer flakelab.repro.yaml \
+  --proof flakelab.proof.json \
+  --patch candidate.diff \
+  --open
 ```
 
-One `slr_live_` key works across browsers, sandboxes, and desktops, and every
-product bills to the same balance.
+The output is evidence rather than an AI guess:
 
-## Which product do I want?
+- the exact fault condition and smallest confirmed parameter;
+- repeated pass/fail counts with confidence bounds;
+- rejected hypotheses as well as the confirmed one;
+- an executable YAML reproducer;
+- a reviewable candidate diff that never touches the working tree;
+- hostile, normal, regression, typecheck, and lint proof;
+- one offline HTML report with no runtime network dependency.
 
-- **Cloud browser** — you need a *web page*: scraping, testing, filling forms,
-  anything Playwright or Puppeteer would do locally. Adds stealth, managed
-  proxies, captcha solving, profiles, and session recording.
-- **Sandbox** — you need to *run code*: an LLM's Python, an untrusted build, a
-  data job. A headless microVM that boots from a snapshot in about a second.
-- **Desktop** — you need a *screen*: computer-use agents, GUI apps, anything
-  that has to be clicked. A sandbox plus X11 and a live VNC stream.
+## What makes it different
 
-## Gotchas the examples encode
+| Typical flaky-test tooling | FlakeLab |
+| --- | --- |
+| Detects repeated failure | Intervenes on suspected causes |
+| Stores traces | Connects each claim to experiment evidence |
+| Quarantines unstable tests | Produces a deterministic reproducer |
+| Reports a green rerun | Proves hostile and normal behavior |
+| Treats Git bisect as pass/fail | Bisects failure probability with confidence bounds |
 
-Things that cost you an afternoon if you meet them cold:
+The model supplies investigative judgment through Vercel AI SDK and Groq. The deterministic
+engine—not the model—decides test outcomes, confidence, minimization, policy compliance, and proof.
 
-- **TypeScript: call `await solari.close()`.** The browser client keeps a
-  loopback proxy open for connection retries. Skip the close and your script
-  prints its output and then hangs forever instead of exiting.
-- **Recording is per session, not per account.** Pass `recording: true` when you
-  create the session; without it the replay endpoint 404s forever. The upload is
-  async after release, so poll for ~30s before giving up.
-- **Sandbox commands are not shell-interpreted.** `run("ls -la")` looks for a
-  binary named `ls -la`. Put argv in `args`, or run `sh -c` explicitly.
-- **`kill()`, not `close()`, ends a VM.** `close()` drops your local control
-  channel; the VM keeps running until its idle timeout.
-- **`timeoutMs` is a rolling idle window**, not a hard deadline — it resets on
-  every use.
+## CI and adoption
 
-## Links
+The reusable action at [`.github/actions/flakelab/action.yml`](.github/actions/flakelab/action.yml)
+selects changed or affected browser tests, runs a bounded diagnosis, uploads the portable evidence
+bundle, and writes a Markdown job summary. The example workflow runs local quality checks for every
+pull request and allows secret-backed diagnosis only for same-repository or manually dispatched
+runs protected by the `flakelab` GitHub environment.
 
-- Docs — [docs.getsolari.com](https://docs.getsolari.com)
-- Console — [console.getsolari.com](https://console.getsolari.com)
-- Changelog — [changelog.getsolari.com](https://changelog.getsolari.com)
-- Questions — [hello@getsolari.com](mailto:hello@getsolari.com)
+## Explore
 
-## Contributing
+- [Detailed package guide](projects/flakelab/README.md)
+- [90-second demonstration](docs/DEMO.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Costs and limitations](docs/COSTS-AND-LIMITATIONS.md)
+- [Threat model](docs/THREAT-MODEL.md)
+- [Sample regression pull request](examples/pull-request/README.md)
+- [Full product and phase specification](FLAKELAB.md)
 
-New examples are welcome. Keep them small, make them run end-to-end against the
-real API, and put anything surprising in a comment right where it bites.
+## Current verification
 
-MIT licensed.
+The default suite is local and credit-free. Live checks are explicit because they consume remote
+resources:
+
+```bash
+cd projects/flakelab
+pnpm quality
+pnpm verify:solari
+pnpm verify:solari-parallel
+pnpm verify:bisect
+```
+
+FlakeLab is intentionally CLI-first: source, tests, Git history, and CI already live in the
+repository. The single-file visual report is the explanation surface.
