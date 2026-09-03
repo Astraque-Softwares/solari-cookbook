@@ -60,7 +60,7 @@ runs:
         FLAKELAB_HEAD: ${{ inputs.head }}
         FLAKELAB_PROJECT: ${{ inputs.project-directory }}
       run: >-
-        pnpm --dir "$FLAKELAB_PROJECT" ci:select --
+        pnpm --dir "$FLAKELAB_PROJECT" ci:select
         --base "$FLAKELAB_BASE"
         --head "$FLAKELAB_HEAD"
 

@@ -164,6 +164,7 @@ test("GitHub integration is least-privilege and guards secret-backed diagnosis",
   expect(workflow.jobs.diagnosis["runs-on"]).toBe("blacksmith-4vcpu-ubuntu-2404")
   expect(workflow.permissions).toEqual({ contents: "read" })
   expect(actionSource).not.toContain("package-json-file")
+  expect(actionSource).not.toMatch(/ci:select\s+--\s+--base/u)
   expect(workflowSource).not.toContain("package-json-file")
   expect(workflowSource).not.toContain("pull_request_target")
 })
