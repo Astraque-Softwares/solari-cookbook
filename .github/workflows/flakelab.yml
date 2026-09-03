@@ -27,7 +27,7 @@ concurrency:
 jobs:
   quality:
     name: Local quality gate
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - name: Checkout without persisted credentials
@@ -42,7 +42,6 @@ jobs:
           runtime: node@22.14.0
           cache: true
           cache-dependency-path: projects/flakelab/pnpm-lock.yaml
-          package-json-file: projects/flakelab/package.json
           working-directory: projects/flakelab
           install: false
 
@@ -64,7 +63,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     environment: flakelab
     steps:
@@ -82,6 +81,7 @@ jobs:
           head: ${{ github.event.pull_request.head.sha || inputs.head }}
           groq-api-key: ${{ secrets.GROQ_API_KEY }}
           solari-api-key: ${{ secrets.SOLARI_API_KEY }}
+          test: tests/fixtures/flaky-checkout.spec.ts
 
       - name: Link evidence bundle
         if: steps.flakelab.outputs.artifact-url != ''
