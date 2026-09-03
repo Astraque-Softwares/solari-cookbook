@@ -42,7 +42,6 @@ jobs:
           runtime: node@22.14.0
           cache: true
           cache-dependency-path: projects/flakelab/pnpm-lock.yaml
-          package-json-file: projects/flakelab/package.json
           working-directory: projects/flakelab
           install: false
 

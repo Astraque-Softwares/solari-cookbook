@@ -37,7 +37,6 @@ runs:
         runtime: node@22.14.0
         cache: true
         cache-dependency-path: ${{ inputs.project-directory }}/pnpm-lock.yaml
-        package-json-file: ${{ inputs.project-directory }}/package.json
         working-directory: ${{ inputs.project-directory }}
         install: false
 

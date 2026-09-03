@@ -153,7 +153,8 @@ test("GitHub integration is least-privilege and guards secret-backed diagnosis",
       }),
     }),
   })
-  const action = actionSchema.parse(parse(await readFile(actionPath, "utf8")))
+  const actionSource = await readFile(actionPath, "utf8")
+  const action = actionSchema.parse(parse(actionSource))
   const workflowSource = await readFile(workflowPath, "utf8")
   const workflow = workflowSchema.parse(parse(workflowSource))
 
@@ -162,5 +163,7 @@ test("GitHub integration is least-privilege and guards secret-backed diagnosis",
   expect(workflow.jobs.quality["runs-on"]).toBe("blacksmith-4vcpu-ubuntu-2404")
   expect(workflow.jobs.diagnosis["runs-on"]).toBe("blacksmith-4vcpu-ubuntu-2404")
   expect(workflow.permissions).toEqual({ contents: "read" })
+  expect(actionSource).not.toContain("package-json-file")
+  expect(workflowSource).not.toContain("package-json-file")
   expect(workflowSource).not.toContain("pull_request_target")
 })
