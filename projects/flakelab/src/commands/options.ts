@@ -14,18 +14,22 @@ export interface CliValues {
   "min-rate": string
   html: string
   good: string
+  help: boolean
   model: string
   open: boolean
   output: string
   patch: string
   publish: boolean
   proof: string
+  prove: boolean
   report: string
   reproducer: string
   pattern: string
   runs: string
   seed: string
   trials: string
+  verbose: boolean
+  version: boolean
 }
 
 export function positiveNumberOption(value: string, name: string): number {

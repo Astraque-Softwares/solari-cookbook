@@ -9,3 +9,14 @@ test("failure normalization removes volatile timing and source positions", () =>
 
   expect(normalizeFailureOutput(first)).toBe(normalizeFailureOutput(second))
 })
+
+test("failure normalization preserves the failing Playwright test identity", () => {
+  const output = [
+    "1) [chromium] › tests\\checkout.spec.ts:15:1 › completes checkout",
+    "Error: checkout timed out",
+  ].join("\n")
+
+  expect(normalizeFailureOutput(output)).toContain(
+    "[chromium] › tests\\checkout.spec.ts:<line> › completes checkout",
+  )
+})

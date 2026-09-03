@@ -1,16 +1,27 @@
 
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
+import { createRequire } from "node:module"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { TrialOutcome, TrialPlan } from "../domain/schema.js"
 
 const MAX_DIAGNOSTIC_BYTES = 64 * 1024
-const playwrightCliPath = fileURLToPath(import.meta.resolve("@playwright/test/cli"))
+const bundledPlaywrightCliPath = fileURLToPath(import.meta.resolve("@playwright/test/cli"))
 
 export type TrialExecutor = (trial: TrialPlan) => Promise<TrialOutcome>
 
 interface ExecutorOptions {
   signal?: AbortSignal
+}
+
+export function resolvePlaywrightCliPath(projectRoot: string): string {
+  const projectRequire = createRequire(join(projectRoot, "package.json"))
+  try {
+    return projectRequire.resolve("@playwright/test/cli")
+  } catch {
+    return bundledPlaywrightCliPath
+  }
 }
 
 function fingerprint(value: string): string {
@@ -59,10 +70,13 @@ export function normalizeFailureOutput(value: string): string {
   const lines = withoutAnsi
     .split(/\r?\n/u)
     .map((line) => line.trim())
+  const testLine = lines.find((line) =>
+    line.includes("›") && /\.(?:spec|test)\.[cm]?[jt]sx?:\d+/u.test(line))
   const prefixes = ["Error: ", "Locator:", "Expected:", "Received:"]
-  const selected = prefixes
+  const diagnosticLines = prefixes
     .map((prefix) => lines.find((line) => line.startsWith(prefix)))
     .filter((line) => line !== undefined)
+  const selected = testLine ? [testLine, ...diagnosticLines] : diagnosticLines
   if (selected.length === 0) {
     return "playwright-exit-failure"
   }
@@ -77,6 +91,7 @@ export function createPlaywrightExecutor(
   selector: string,
   options: ExecutorOptions = {},
 ): TrialExecutor {
+  const playwrightCliPath = resolvePlaywrightCliPath(projectRoot)
   return async (trial) => {
     const startedAt = Date.now()
     if (options.signal?.aborted) {

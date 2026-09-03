@@ -1,10 +1,29 @@
 import { expect, test } from "@playwright/test"
-import { readFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 
 
 import { createNdjsonWriter } from "../../src/artifacts/ndjson.js"
 import { runEventSchema, runRequestSchema } from "../../src/domain/schema.js"
 import { runLocalDiagnostics } from "../../src/runner/local.js"
+import { resolvePlaywrightCliPath } from "../../src/runner/playwright-executor.js"
+
+test("runner prefers the Playwright installation belonging to the scanned project", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const project = testInfo.outputPath("consumer")
+  const packageRoot = join(project, "node_modules", "@playwright", "test")
+  await mkdir(packageRoot, { recursive: true })
+  await writeFile(join(project, "package.json"), "{}\n", "utf8")
+  await writeFile(join(packageRoot, "cli.js"), "export {}\n", "utf8")
+  await writeFile(
+    join(packageRoot, "package.json"),
+    '{"name":"@playwright/test","exports":{"./cli":"./cli.js"}}\n',
+    "utf8",
+  )
+
+  expect(resolvePlaywrightCliPath(project)).toBe(join(packageRoot, "cli.js"))
+})
 
 test("runner records complete events and separates baseline from fault failures", async ({
   browserName: _browserName,

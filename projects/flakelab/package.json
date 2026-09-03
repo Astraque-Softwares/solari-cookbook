@@ -1,18 +1,44 @@
 {
-  "name": "@flakelab/cli",
-  "private": true,
-  "version": "0.0.0",
+  "name": "flakelab",
+  "version": "0.1.0",
+  "description": "Find, reproduce, and prove fixes for flaky Playwright tests.",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kelvinguchu/solari-cookbook.git",
+    "directory": "projects/flakelab"
+  },
+  "homepage": "https://github.com/kelvinguchu/solari-cookbook/tree/main/projects/flakelab",
+  "engines": {
+    "node": ">=20"
+  },
   "packageManager": "pnpm@11.6.0",
   "bin": {
-    "flakelab": "./src/cli.ts"
+    "flakelab": "./bin/flakelab.mjs"
+  },
+  "exports": {
+    "./playwright": {
+      "types": "./dist/playwright.d.ts",
+      "import": "./dist/playwright.js"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "ci:select": "tsx src/ci/select-command.ts",
     "ci:summary": "tsx src/ci/summary-command.ts",
     "flakelab": "tsx src/cli.ts",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix --max-warnings=0",
+    "prepack": "pnpm build",
     "test": "playwright test --pass-with-no-tests",
     "test:headed": "playwright test --headed",
     "typecheck": "tsc --noEmit",
@@ -35,6 +61,9 @@
     "vite": "^8.2.2",
     "yaml": "^2.9.0",
     "zod": "^4.5.4"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.50.0 <2"
   },
   "devDependencies": {
     "@hono/eslint-config": "^2.1.1",

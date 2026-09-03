@@ -4,6 +4,53 @@ FlakeLab is an AI debugging scientist for flaky Playwright tests. The product ar
 scope, and milestone-based development plan live in
 [`../../FLAKELAB.md`](../../FLAKELAB.md).
 
+## Quick start
+
+Run a bounded, local, credit-free stability scan from any Playwright project:
+
+```bash
+npx flakelab@latest .
+```
+
+Pass a file when you already know which test is suspicious, and increase repetitions when the
+failure is rare:
+
+```bash
+npx flakelab@latest tests/checkout.spec.ts --runs 20
+npx flakelab@latest tests/checkout.spec.ts --runs 20 --verbose
+```
+
+The default command repeatedly executes the selected target in isolated Playwright processes,
+distinguishes intermittent failures from consistent test failures, prints a concise result, and
+writes machine-readable evidence to `.flakelab/runs/scan.json`. It does not call Groq or Solari.
+
+For the complete causal workflow, use FlakeLab's Playwright fixture in tests that should accept
+controlled browser faults:
+
+```ts
+import { expect, test } from "flakelab/playwright"
+```
+
+Then explicitly opt into AI investigation and isolated proof:
+
+```bash
+npx flakelab@latest tests/checkout.spec.ts \
+  --prove \
+  --pattern "**/api/checkout" \
+  --open
+```
+
+`--prove` requires `GROQ_API_KEY` and `SOLARI_API_KEY`. It chains trigger discovery, reproducer
+verification, bounded AI investigation, candidate generation, proof in a disposable Solari
+microVM, and the offline evidence report. The candidate remains a reviewable diff and is never
+applied automatically.
+
+See every command and default without running tests:
+
+```bash
+npx flakelab@latest --help
+```
+
 The local diagnostic core can already run controlled baseline and fault-injected trials:
 
 ```bash
