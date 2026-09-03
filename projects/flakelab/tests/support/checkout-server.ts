@@ -18,7 +18,7 @@ const checkoutPage = `<!doctype html>
         const deadline = setTimeout(() => {
           expired = true
           status.textContent = 'Checkout timed out'
-        }, 100)
+        }, 75)
         await fetch('/api/checkout', { method: 'POST' })
         clearTimeout(deadline)
         if (!expired) status.textContent = 'Checkout complete'
