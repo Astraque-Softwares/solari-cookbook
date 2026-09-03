@@ -13,6 +13,7 @@ test.afterAll(async () => {
 })
 
 test("checkout completes before the product deadline", async ({ page }) => {
+  // The product deadline must remain safe under realistic response latency.
   await page.goto(checkout.url)
   await page.getByRole("button", { name: "Place order" }).click()
   await expect(page.getByRole("status")).toHaveText("Checkout complete", { timeout: 750 })

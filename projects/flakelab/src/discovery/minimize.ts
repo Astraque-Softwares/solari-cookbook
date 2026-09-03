@@ -3,6 +3,8 @@ import type { TrialExecutor } from "../runner/playwright-executor.js"
 import type { ExperimentResult } from "./evaluate.js"
 import { evaluateExperiment } from "./evaluate.js"
 
+const MINIMUM_CONFIRMATION_TRIALS = 12
+
 export interface DelayDiscoveryOptions {
   concurrency: number
   maximumDelayMs: number
@@ -23,6 +25,25 @@ export interface DelayDiscoveryResult {
   experiments: DelayExperiment[]
   trigger: NetworkDelayFault
   triggerResult: ExperimentResult
+}
+
+async function confirmStableDelay(
+  experiments: DelayExperiment[],
+  minimumDelayMs: number,
+  evaluateDelay: (delayMs: number, trials?: number) => Promise<ExperimentResult>,
+  confirmationTrials: number,
+): Promise<{ delayMs: number; result: ExperimentResult }> {
+  const candidates = [...new Set(experiments
+    .filter((entry) => entry.delayMs >= minimumDelayMs && entry.result.confirmed)
+    .map((entry) => entry.delayMs))]
+    .sort((left, right) => left - right)
+  for (const delayMs of candidates) {
+    const result = await evaluateDelay(delayMs, confirmationTrials)
+    if (result.confirmed) {
+      return { delayMs, result }
+    }
+  }
+  throw new Error("No network delay reproduced the failure in two independent trial batches")
 }
 
 export async function minimizeItems<T>(
@@ -59,9 +80,12 @@ export async function discoverNetworkDelay(
   }
 
   const experiments: DelayExperiment[] = []
-  const evaluateDelay = async (delayMs: number): Promise<ExperimentResult> => {
+  const evaluateDelay = async (
+    delayMs: number,
+    trials = options.trials,
+  ): Promise<ExperimentResult> => {
     const fault = { kind: "network-delay" as const, pattern: options.pattern, delayMs }
-    const result = await evaluateExperiment(execute, { ...common, fault })
+    const result = await evaluateExperiment(execute, { ...common, fault, trials })
     experiments.push({ delayMs, result })
     return result
   }
@@ -82,12 +106,16 @@ export async function discoverNetworkDelay(
       passingDelayMs = candidate
     }
   }
-  const triggerResult = experiments.find((entry) => entry.delayMs === failingDelayMs)?.result
-    ?? await evaluateDelay(failingDelayMs)
+  const stable = await confirmStableDelay(
+    experiments,
+    failingDelayMs,
+    evaluateDelay,
+    Math.max(options.trials, MINIMUM_CONFIRMATION_TRIALS),
+  )
   return {
     baseline,
     experiments,
-    trigger: { kind: "network-delay", pattern: options.pattern, delayMs: failingDelayMs },
-    triggerResult,
+    trigger: { kind: "network-delay", pattern: options.pattern, delayMs: stable.delayMs },
+    triggerResult: stable.result,
   }
 }

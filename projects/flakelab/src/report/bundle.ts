@@ -1,6 +1,8 @@
 import { build } from "vite"
+import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
+import { dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import type { EvidenceReport } from "./schema.js"
 
@@ -46,6 +48,8 @@ export async function writePortableReport(
   outputPath: string,
   report: EvidenceReport,
 ): Promise<void> {
+  const sourceEntry = fileURLToPath(new URL("./browser-entry.tsx", import.meta.url))
+  const compiledEntry = fileURLToPath(new URL("./browser-entry.js", import.meta.url))
   const result = await build({
     configFile: false,
     logLevel: "silent",
@@ -55,7 +59,7 @@ export async function writePortableReport(
       minify: true,
       write: false,
       rollupOptions: {
-        input: resolve(projectRoot, "src/report/browser-entry.tsx"),
+        input: existsSync(sourceEntry) ? sourceEntry : compiledEntry,
       },
     },
   })

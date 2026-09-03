@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import type { ExperimentResult } from "../discovery/evaluate.js"
 import { experimentResultSchema } from "../investigator/schema.js"
 import type { Reproducer } from "../reproducer/schema.js"
+import { retryTransient } from "../solari/retry.js"
 
 const REMOTE_ROOT = "/work/flakelab"
 const REMOTE_SETUP_ROOT = "/work/flakelab/.flakelab/setup"
@@ -305,14 +306,21 @@ export async function validatePatchInSolari(
     baseUrl: options.baseUrl,
     callTimeoutMs: COMMAND_TIMEOUT_MS,
   })
-  const sandbox = await client.create({
-    template: "base",
-    cpu: 4,
-    memMb: 8_192,
-    timeoutMs: SANDBOX_TIMEOUT_MS,
-    lifecycle: { onTimeout: "kill" },
-    metadata: { product: "flakelab", role: "patch-proof" },
-  })
+  const sandbox = await retryTransient(
+    async () => client.create({
+      template: "base",
+      cpu: 4,
+      memMb: 8_192,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+      lifecycle: { onTimeout: "kill" },
+      metadata: { product: "flakelab", role: "patch-proof" },
+    }),
+    {
+      attempts: 5,
+      baseDelayMs: 500,
+      signal: options.signal,
+    },
+  )
   try {
     return await validateInSandbox(sandbox, options)
   } finally {
