@@ -7,6 +7,7 @@ import { createGroqInvestigatorModel } from "../investigator/groq.js"
 import { generateCandidatePatch } from "../repair/generator.js"
 import { validateProofOfFix } from "../repair/validator.js"
 import { readReproducer } from "../reproducer/file.js"
+import { withSolariTransport } from "../solari/transport.js"
 import { ProgressReporter } from "../ui/progress.js"
 import type { CliValues } from "./options.js"
 import { integerOption, withInterruption } from "./options.js"
@@ -39,15 +40,18 @@ export async function repair(investigationPath: string, values: CliValues): Prom
     })
     progress.done(`${candidate.edits.length} source edit${candidate.edits.length === 1 ? "" : "s"}`)
     progress.start("Proving the candidate in a Solari microVM")
-    return validateProofOfFix({
-      apiKey: solariApiKey,
-      baseUrl,
-      candidate,
-      concurrency: integerOption(values.concurrency, "concurrency"),
-      projectRoot,
-      reproducer,
-      signal,
-    }, patchPath)
+    return withSolariTransport(async () => validateProofOfFix(
+      {
+        apiKey: solariApiKey,
+        baseUrl,
+        candidate,
+        concurrency: integerOption(values.concurrency, "concurrency"),
+        projectRoot,
+        reproducer,
+        signal,
+      },
+      patchPath,
+    ))
   })
   progress.done(result.proof.patchAccepted ? "accepted" : "rejected")
   await writeFile(patchPath, result.diff, "utf8")

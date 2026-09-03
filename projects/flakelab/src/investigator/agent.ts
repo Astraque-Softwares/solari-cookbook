@@ -3,12 +3,18 @@ import { generateText, Output } from "ai"
 import { z } from "zod"
 
 import { evaluateExperiment } from "../discovery/evaluate.js"
+import type { ExperimentResult } from "../discovery/evaluate.js"
 import type { Fault } from "../domain/schema.js"
 import type { TrialExecutor } from "../runner/playwright-executor.js"
 import { InvestigationBudget } from "./budget.js"
 import { InvestigationLedger } from "./ledger.js"
 import { readSafeTestContext } from "./safe-source.js"
-import type { ExperimentCondition, InvestigationReport } from "./schema.js"
+import type {
+  ExperimentCondition,
+  ExperimentEvidence,
+  Hypothesis,
+  InvestigationReport,
+} from "./schema.js"
 import { experimentConditionSchema } from "./schema.js"
 
 const plannedHypothesisSchema = z.object({
@@ -37,6 +43,15 @@ const assessmentSchema = z.object({
   conclusion: z.string().min(30).max(2_000),
   conclusionEvidenceIds: z.array(z.string().regex(/^E\d+$/u)).min(1),
 })
+
+type Assessment = z.infer<typeof assessmentSchema>
+type InvestigationPlan = z.infer<typeof investigationPlanSchema>
+
+interface LedgerState {
+  evidence: ExperimentEvidence[]
+  hypotheses: Hypothesis[]
+  ledger: InvestigationLedger
+}
 
 export interface InvestigatorOptions {
   concurrency: number
@@ -107,8 +122,57 @@ function assessmentPrompt(ledgerState: object): string {
     "at least one alternative. Confirmation requires a controlled fault that materially and",
     "confidently increased failure rate above baseline. The conclusion must describe the",
     "confirmed causal mechanism and cite only experiment IDs associated with that hypothesis.",
+    "Every rejected hypothesis must cite its own experiment where result.confirmed is false;",
+    "never use a confirmed experiment as the sole evidence for rejection.",
     JSON.stringify(ledgerState, null, 2),
   ].join("\n")
+}
+
+function assessmentRepairPrompt(
+  ledgerState: object,
+  previous: Assessment,
+  validationError: string,
+): string {
+  return [
+    assessmentPrompt(ledgerState),
+    "Your previous assessment was rejected by the deterministic evidence validator.",
+    `Validation error: ${validationError}`,
+    "Previous invalid assessment:",
+    JSON.stringify(previous, null, 2),
+    "Return one corrected assessment. Do not change or invent experiment results.",
+  ].join("\n")
+}
+
+function createLedgerState(plan: InvestigationPlan, results: ExperimentResult[]): LedgerState {
+  const ledger = new InvestigationLedger()
+  const hypotheses = plan.hypotheses.map((hypothesis) =>
+    ledger.propose(hypothesis.statement, hypothesis.prediction))
+  const evidence = results.map((result, index) => {
+    const experiment = plan.experiments[index]
+    const hypothesis = hypotheses[experiment.hypothesisIndex]
+    return ledger.addExperiment(hypothesis.id, experiment.condition, result)
+  })
+  return { evidence, hypotheses, ledger }
+}
+
+function applyAssessment(state: LedgerState, assessment: Assessment): void {
+  const assessedIds = new Set(assessment.assessments.map((item) => item.hypothesisId))
+  if (assessedIds.size !== state.hypotheses.length) {
+    throw new Error("Investigator must assess every proposed hypothesis exactly once")
+  }
+  for (const item of assessment.assessments) {
+    state.ledger.assess(
+      item.hypothesisId,
+      item.status,
+      item.evidenceExperimentIds,
+      item.explanation,
+    )
+  }
+  state.ledger.conclude(
+    assessment.conclusionHypothesisId,
+    assessment.conclusion,
+    assessment.conclusionEvidenceIds,
+  )
 }
 
 function validatePlan(
@@ -158,9 +222,6 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
   const plan = planResult.output
   validatePlan(plan, options)
 
-  const ledger = new InvestigationLedger()
-  const hypotheses = plan.hypotheses.map((hypothesis) =>
-    ledger.propose(hypothesis.statement, hypothesis.prediction))
   plan.experiments.forEach(() => {
     budget.reserveExperiment(options.trialsPerExperiment)
   })
@@ -173,49 +234,58 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
       signal,
       trials: options.trialsPerExperiment,
     })))
-  const evidence = results.map((result, index) => {
-    const experiment = plan.experiments[index]
-    const hypothesis = hypotheses[experiment.hypothesisIndex]
-    return ledger.addExperiment(hypothesis.id, experiment.condition, result)
-  })
+  let state = createLedgerState(plan, results)
 
   const assessmentResult = await generateText({
     model: options.model,
     output: Output.object({ schema: assessmentSchema }),
-    prompt: assessmentPrompt({ hypotheses, experiments: evidence }),
+    prompt: assessmentPrompt({ hypotheses: state.hypotheses, experiments: state.evidence }),
     maxOutputTokens: options.outputTokenLimit,
     maxRetries: 2,
     timeout: { totalMs: budget.remainingMs() },
     abortSignal: signal,
     temperature: 0.2,
   })
-  const assessment = assessmentResult.output
-  const assessedIds = new Set(assessment.assessments.map((item) => item.hypothesisId))
-  if (assessedIds.size !== hypotheses.length) {
-    throw new Error("Investigator must assess every proposed hypothesis exactly once")
+  const assessmentResults = [assessmentResult]
+  try {
+    applyAssessment(state, assessmentResult.output)
+  } catch (error) {
+    if (options.maxSteps < 3) {
+      throw error
+    }
+    const validationError = error instanceof Error ? error.message : "invalid evidence assessment"
+    const repairResult = await generateText({
+      model: options.model,
+      output: Output.object({ schema: assessmentSchema }),
+      prompt: assessmentRepairPrompt(
+        { hypotheses: state.hypotheses, experiments: state.evidence },
+        assessmentResult.output,
+        validationError,
+      ),
+      maxOutputTokens: options.outputTokenLimit,
+      maxRetries: 1,
+      timeout: { totalMs: budget.remainingMs() },
+      abortSignal: signal,
+      temperature: 0,
+    })
+    assessmentResults.push(repairResult)
+    state = createLedgerState(plan, results)
+    applyAssessment(state, repairResult.output)
   }
-  for (const item of assessment.assessments) {
-    ledger.assess(
-      item.hypothesisId,
-      item.status,
-      item.evidenceExperimentIds,
-      item.explanation,
-    )
-  }
-  ledger.conclude(
-    assessment.conclusionHypothesisId,
-    assessment.conclusion,
-    assessment.conclusionEvidenceIds,
-  )
 
-  const inputTokens = (planResult.usage.inputTokens ?? 0) + (assessmentResult.usage.inputTokens ?? 0)
-  const outputTokens =
-    (planResult.usage.outputTokens ?? 0) + (assessmentResult.usage.outputTokens ?? 0)
+  const inputTokens = (planResult.usage.inputTokens ?? 0) + assessmentResults.reduce(
+    (total, result) => total + (result.usage.inputTokens ?? 0),
+    0,
+  )
+  const outputTokens = (planResult.usage.outputTokens ?? 0) + assessmentResults.reduce(
+    (total, result) => total + (result.usage.outputTokens ?? 0),
+    0,
+  )
   const cost = estimatedCost(inputTokens, outputTokens, options)
   if (cost > budget.maxCostUsd()) {
     throw new Error(`Investigation cost $${cost.toFixed(4)} exceeded its configured budget`)
   }
-  return ledger.buildReport(options.test, options.modelId, {
+  return state.ledger.buildReport(options.test, options.modelId, {
     inputTokens,
     outputTokens,
     estimatedCostUsd: cost,

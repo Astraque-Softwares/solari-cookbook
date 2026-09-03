@@ -40,6 +40,34 @@ test("network delay discovery finds the smallest confirmed integer delay", async
 
   expect(result.trigger.delayMs).toBe(100)
   expect(result.triggerResult.confirmed).toBe(true)
+  expect(result.triggerResult.trials).toBe(12)
+})
+
+test("network delay discovery rejects a boundary that does not confirm twice", async () => {
+  const attempts = new Map<number, number>()
+  const result = await discoverNetworkDelay((trial) => {
+    const delayMs = trial.fault?.kind === "network-delay" ? trial.fault.delayMs : 0
+    const attempt = attempts.get(delayMs) ?? 0
+    attempts.set(delayMs, attempt + 1)
+    const unstableBoundary = delayMs === 100 && attempt < 4
+    const failed = delayMs > 100 || unstableBoundary
+    return Promise.resolve({
+      status: failed ? "failed" : "passed",
+      durationMs: 1,
+      exitCode: failed ? 1 : 0,
+      ...(failed ? { failureSignature: "checkout-timeout" } : {}),
+    })
+  }, {
+    concurrency: 1,
+    maximumDelayMs: 250,
+    minimumFailureRate: 0.7,
+    pattern: "**/api/checkout",
+    seed: 42,
+    trials: 4,
+  })
+
+  expect(result.trigger.delayMs).toBe(101)
+  expect(result.triggerResult.confirmed).toBe(true)
 })
 
 test("combination minimization removes irrelevant conditions", async () => {

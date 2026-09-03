@@ -24,7 +24,7 @@ async function main(): Promise<void> {
       "max-delay": { type: "string", default: "250" },
       "max-experiments": { type: "string", default: "3" },
       "max-seconds": { type: "string", default: "90" },
-      "max-steps": { type: "string", default: "2" },
+      "max-steps": { type: "string", default: "3" },
       "max-trials": { type: "string", default: "12" },
       "min-rate": { type: "string", default: "0.7" },
       html: { type: "string", default: "flakelab.report.html" },
