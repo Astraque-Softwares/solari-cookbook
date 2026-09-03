@@ -18,6 +18,10 @@ inputs:
   solari-api-key:
     description: Solari credential used by isolated proof execution.
     required: true
+  test:
+    description: Optional Playwright test to diagnose instead of automatic changed-test selection.
+    required: false
+    default: ""
 
 outputs:
   artifact-url:
@@ -25,7 +29,7 @@ outputs:
     value: ${{ steps.artifact.outputs.artifact-url }}
   selected-test:
     description: First changed or affected Playwright test selected for bounded diagnosis.
-    value: ${{ steps.select.outputs.first_test }}
+    value: ${{ steps.target.outputs.test }}
 
 runs:
   using: composite
@@ -64,23 +68,40 @@ runs:
         --base "$FLAKELAB_BASE"
         --head "$FLAKELAB_HEAD"
 
+    - name: Resolve diagnosis target
+      id: target
+      shell: bash
+      env:
+        FLAKELAB_EXPLICIT_TEST: ${{ inputs.test }}
+        FLAKELAB_SELECTED_TEST: ${{ steps.select.outputs.first_test }}
+      run: |
+        target="$FLAKELAB_EXPLICIT_TEST"
+        if [[ -z "$target" ]]; then
+          target="$FLAKELAB_SELECTED_TEST"
+        fi
+        if [[ ! "$target" =~ ^[a-zA-Z0-9._/-]*$ ]]; then
+          echo 'Selected test path contains unsupported characters.' >&2
+          exit 1
+        fi
+        echo "test=$target" >> "$GITHUB_OUTPUT"
+
     - name: Discover deterministic trigger
-      if: steps.select.outputs.has_tests == 'true'
+      if: steps.target.outputs.test != ''
       shell: bash
       env:
         FLAKELAB_PROJECT: ${{ inputs.project-directory }}
-        FLAKELAB_TEST: ${{ steps.select.outputs.first_test }}
+        FLAKELAB_TEST: ${{ steps.target.outputs.test }}
       run: >-
         pnpm --dir "$FLAKELAB_PROJECT" flakelab discover "$FLAKELAB_TEST"
         --trials 4 --concurrency 4 --max-delay 250 --min-rate 0.7
         --output flakelab.repro.yaml
 
     - name: Run bounded AI investigation
-      if: steps.select.outputs.has_tests == 'true'
+      if: steps.target.outputs.test != ''
       shell: bash
       env:
         FLAKELAB_PROJECT: ${{ inputs.project-directory }}
-        FLAKELAB_TEST: ${{ steps.select.outputs.first_test }}
+        FLAKELAB_TEST: ${{ steps.target.outputs.test }}
         GROQ_API_KEY: ${{ inputs.groq-api-key }}
       run: >-
         pnpm --dir "$FLAKELAB_PROJECT" flakelab investigate "$FLAKELAB_TEST"
@@ -88,7 +109,7 @@ runs:
         --report flakelab.investigation.json
 
     - name: Generate and prove candidate repair
-      if: steps.select.outputs.has_tests == 'true'
+      if: steps.target.outputs.test != ''
       id: repair
       continue-on-error: true
       shell: bash
@@ -103,7 +124,7 @@ runs:
         --proof flakelab.proof.json
 
     - name: Bundle portable report
-      if: steps.select.outputs.has_tests == 'true'
+      if: steps.target.outputs.test != ''
       shell: bash
       env:
         FLAKELAB_PROJECT: ${{ inputs.project-directory }}
@@ -115,7 +136,7 @@ runs:
         --html flakelab.report.html
 
     - name: Upload evidence bundle
-      if: steps.select.outputs.has_tests == 'true'
+      if: steps.target.outputs.test != ''
       id: artifact
       uses: actions/upload-artifact@v7.0.1
       with:
@@ -133,7 +154,7 @@ runs:
           ${{ inputs.project-directory }}/.flakelab/changed-tests.json
 
     - name: Write GitHub job summary
-      if: steps.select.outputs.has_tests == 'true'
+      if: steps.target.outputs.test != ''
       shell: bash
       env:
         FLAKELAB_ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
@@ -141,14 +162,14 @@ runs:
       run: pnpm --dir "$FLAKELAB_PROJECT" ci:summary
 
     - name: Enforce proof result after evidence upload
-      if: steps.select.outputs.has_tests == 'true' && steps.repair.outcome == 'failure'
+      if: steps.target.outputs.test != '' && steps.repair.outcome == 'failure'
       shell: bash
       run: |
         echo 'FlakeLab rejected or could not prove the candidate repair.' >&2
         exit 1
 
     - name: Report no affected browser tests
-      if: steps.select.outputs.has_tests != 'true'
+      if: steps.target.outputs.test == ''
       shell: bash
       run: |
         printf '%s\n' '## FlakeLab' '' 'No changed or affected browser tests were selected.' >> "$GITHUB_STEP_SUMMARY"

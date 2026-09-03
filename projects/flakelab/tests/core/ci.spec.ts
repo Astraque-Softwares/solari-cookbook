@@ -168,6 +168,8 @@ test("GitHub integration is least-privilege and guards secret-backed diagnosis",
   expect(workflow.permissions).toEqual({ contents: "read" })
   expect(actionSource).not.toContain("package-json-file")
   expect(actionSource).not.toMatch(/ci:select\s+--\s+--base/u)
+  expect(actionSource).toContain("FLAKELAB_EXPLICIT_TEST: ${{ inputs.test }}")
+  expect(workflowSource).toContain("test: tests/fixtures/flaky-checkout.spec.ts")
   expect(workflowSource).not.toContain("package-json-file")
   expect(workflowSource).not.toContain("pull_request_target")
 })

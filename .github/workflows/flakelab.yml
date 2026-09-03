@@ -81,6 +81,7 @@ jobs:
           head: ${{ github.event.pull_request.head.sha || inputs.head }}
           groq-api-key: ${{ secrets.GROQ_API_KEY }}
           solari-api-key: ${{ secrets.SOLARI_API_KEY }}
+          test: tests/fixtures/flaky-checkout.spec.ts
 
       - name: Link evidence bundle
         if: steps.flakelab.outputs.artifact-url != ''
