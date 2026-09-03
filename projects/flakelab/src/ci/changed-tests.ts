@@ -6,7 +6,6 @@ import { promisify } from "node:util"
 const execFileAsync = promisify(execFile)
 const MAX_CHANGED_FILES = 500
 const MAX_SELECTED_TESTS = 20
-const TEST_PATTERN = /(?:^|\/)tests\/.+\.(?:spec|test)\.[cm]?[jt]sx?$/u
 const BEHAVIOR_TEST_PATTERN = /^tests\/(?:e2e|fixtures)\/.+\.(?:spec|test)\.[cm]?[jt]sx?$/u
 
 export interface ChangedTestSelection {
@@ -101,7 +100,7 @@ export async function selectChangedTests(
     .map((path) => projectFile(path, relativeProject))
     .filter((path) => path !== undefined)
     .sort((left, right) => left.localeCompare(right))
-  const direct = changedFiles.filter((path) => TEST_PATTERN.test(path))
+  const direct = changedFiles.filter((path) => BEHAVIOR_TEST_PATTERN.test(path))
   let candidates: string[] = []
   let mode: ChangedTestSelection["mode"] = "none"
   if (direct.length > 0) {

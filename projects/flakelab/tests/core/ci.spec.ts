@@ -35,6 +35,7 @@ test("selects directly changed tests and falls back to bounded behavior tests", 
   const project = join(repository, "project")
   try {
     await mkdir(join(project, "src"), { recursive: true })
+    await mkdir(join(project, "tests", "core"), { recursive: true })
     await mkdir(join(project, "tests", "e2e"), { recursive: true })
     await mkdir(join(project, "tests", "fixtures"), { recursive: true })
     await git(repository, ["init", "--quiet"])
@@ -43,8 +44,10 @@ test("selects directly changed tests and falls back to bounded behavior tests", 
     await writeFile(join(project, "src", "app.ts"), "export const ready = true\n", "utf8")
     await writeFile(join(project, "tests", "e2e", "checkout.spec.ts"), "// checkout\n", "utf8")
     await writeFile(join(project, "tests", "fixtures", "cart.spec.ts"), "// cart\n", "utf8")
+    await writeFile(join(project, "tests", "core", "unit.spec.ts"), "// unit\n", "utf8")
     const base = await commit(repository, "initial fixture")
     await writeFile(join(project, "tests", "fixtures", "cart.spec.ts"), "// changed cart\n", "utf8")
+    await writeFile(join(project, "tests", "core", "unit.spec.ts"), "// changed unit\n", "utf8")
     const directHead = await commit(repository, "change one test")
 
     const direct = await selectChangedTests(project, base, directHead)
