@@ -8,6 +8,7 @@ import {
   applyInvestigationAssessment,
   type AssessmentGeneration,
   generateValidInvestigationAssessment,
+  groundAssessmentInEvidence,
   investigationAssessmentSchema,
   type InvestigationAssessment,
   validateExperimentEvidence,
@@ -18,11 +19,13 @@ import { InvestigationLedger } from "./ledger.js"
 import {
   generateValidInvestigationPlan,
   investigationPlanSchema,
+  sameExperimentCondition,
   type InvestigationPlan,
   type PlanGeneration,
 } from "./planning.js"
 import { readSafeTestContext } from "./safe-source.js"
 import type {
+  ExperimentCondition,
   ExperimentEvidence,
   Hypothesis,
   InvestigationReport,
@@ -33,6 +36,24 @@ interface LedgerState {
   evidence: ExperimentEvidence[]
   hypotheses: Hypothesis[]
   ledger: InvestigationLedger
+}
+
+export interface RequiredExperimentEvidence {
+  condition: ExperimentCondition
+  result: ExperimentResult
+}
+
+export async function collectInvestigationResults(
+  plan: InvestigationPlan,
+  requiredEvidence: RequiredExperimentEvidence | undefined,
+  evaluate: (condition: ExperimentCondition) => Promise<ExperimentResult>,
+): Promise<ExperimentResult[]> {
+  return Promise.all(plan.experiments.map(({ condition }) => {
+    if (requiredEvidence && sameExperimentCondition(condition, requiredEvidence.condition)) {
+      return Promise.resolve(requiredEvidence.result)
+    }
+    return evaluate(condition)
+  }))
 }
 
 export interface InvestigatorOptions {
@@ -52,6 +73,7 @@ export interface InvestigatorOptions {
   outputUsdPerMillion: number
   pattern: string
   projectRoot: string
+  requiredEvidence?: RequiredExperimentEvidence
   seed: number
   signal?: AbortSignal
   test: string
@@ -86,6 +108,7 @@ function planningPrompt(
   test: string,
   sources: { content: string; path: string }[],
   maximumDelayMs: number,
+  requiredCondition?: ExperimentCondition,
 ): string {
   return [
     "You are planning a causal investigation of a flaky Playwright test.",
@@ -107,6 +130,9 @@ function planningPrompt(
     "experiment with the hypothesis it tests by",
     `zero-based hypothesisIndex. Network, resource loading, startup event delays, and event-loop stall duration cannot exceed ${maximumDelayMs} ms.`,
     "Do not propose fixes or infer results before experiments run.",
+    ...(requiredCondition
+      ? [`One intervention must repeat this trigger already confirmed by discovery: ${JSON.stringify(requiredCondition)}`]
+      : []),
     `Test path: ${test}`,
     "Bounded local source context:",
     ...sources.flatMap((source) => [`--- ${source.path}`, source.content]),
@@ -190,11 +216,19 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
         throw error
       }
     },
-    initialPrompt: planningPrompt(options.test, sources, options.maximumDelayMs),
+    initialPrompt: planningPrompt(
+      options.test,
+      sources,
+      options.maximumDelayMs,
+      options.requiredEvidence?.condition,
+    ),
     maxAttempts: Math.min(2, options.maxSteps - 1),
     rules: {
       maxExperiments: options.maxExperiments,
       maximumDelayMs: options.maximumDelayMs,
+      ...(options.requiredEvidence
+        ? { requiredCondition: options.requiredEvidence.condition }
+        : {}),
     },
   })
   const plan = planResult.plan
@@ -209,18 +243,21 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
   )
   enforceCostBudget(planningInputTokens, planningOutputTokens, options, budget)
 
-  plan.experiments.forEach(() => {
-    budget.reserveExperiment(options.trialsPerExperiment)
-  })
-  const results = await Promise.all(plan.experiments.map(async (experiment) =>
-    evaluateExperiment(options.execute, {
-      concurrency: options.concurrency,
-      faults: conditionToFaults(experiment.condition, options.pattern, options.test),
-      minimumFailureRate: options.minimumFailureRate,
-      seed: options.seed,
-      signal,
-      trials: options.trialsPerExperiment,
-    })))
+  const results = await collectInvestigationResults(
+    plan,
+    options.requiredEvidence,
+    async (condition) => {
+      budget.reserveExperiment(options.trialsPerExperiment)
+      return evaluateExperiment(options.execute, {
+        concurrency: options.concurrency,
+        faults: conditionToFaults(condition, options.pattern, options.test),
+        minimumFailureRate: options.minimumFailureRate,
+        seed: options.seed,
+        signal,
+        trials: options.trialsPerExperiment,
+      })
+    },
+  )
   let state = createLedgerState(plan, results)
   validateExperimentEvidence(state.evidence)
 
@@ -257,33 +294,47 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
       throw error
     }
   }
-  const assessmentResult = await generateValidInvestigationAssessment({
-    generate: generateAssessment,
-    initialPrompt: assessmentPrompt(ledgerState),
-    maxAttempts: Math.min(2, options.maxSteps - modelSteps),
-  })
-  modelSteps += assessmentResult.attempts.length
-  const assessmentAttempts = [...assessmentResult.attempts]
-  try {
-    applyInvestigationAssessment(state, assessmentResult.assessment)
-  } catch (error) {
-    if (modelSteps >= options.maxSteps) {
-      throw error
-    }
-    const validationError = error instanceof Error ? error.message : "invalid evidence assessment"
-    const repairResult = await generateValidInvestigationAssessment({
+  const assessmentAttempts: AssessmentGeneration["usage"][] = []
+  if (options.requiredEvidence) {
+    applyInvestigationAssessment(
+      state,
+      groundAssessmentInEvidence(state),
+    )
+  } else {
+    const assessmentResult = await generateValidInvestigationAssessment({
       generate: generateAssessment,
-      initialPrompt: assessmentRepairPrompt(
-        ledgerState,
-        assessmentResult.assessment,
-        validationError,
-      ),
-      temperature: 0,
+      initialPrompt: assessmentPrompt(ledgerState),
       maxAttempts: Math.min(2, options.maxSteps - modelSteps),
     })
-    assessmentAttempts.push(...repairResult.attempts)
-    state = createLedgerState(plan, results)
-    applyInvestigationAssessment(state, repairResult.assessment)
+    modelSteps += assessmentResult.attempts.length
+    assessmentAttempts.push(...assessmentResult.attempts)
+    try {
+      applyInvestigationAssessment(
+        state,
+        groundAssessmentInEvidence(state, assessmentResult.assessment),
+      )
+    } catch (error) {
+      if (modelSteps >= options.maxSteps) {
+        throw error
+      }
+      const validationError = error instanceof Error ? error.message : "invalid evidence assessment"
+      const repairResult = await generateValidInvestigationAssessment({
+        generate: generateAssessment,
+        initialPrompt: assessmentRepairPrompt(
+          ledgerState,
+          assessmentResult.assessment,
+          validationError,
+        ),
+        temperature: 0,
+        maxAttempts: Math.min(2, options.maxSteps - modelSteps),
+      })
+      assessmentAttempts.push(...repairResult.attempts)
+      state = createLedgerState(plan, results)
+      applyInvestigationAssessment(
+        state,
+        groundAssessmentInEvidence(state, repairResult.assessment),
+      )
+    }
   }
 
   const inputTokens = planningInputTokens + assessmentAttempts.reduce(

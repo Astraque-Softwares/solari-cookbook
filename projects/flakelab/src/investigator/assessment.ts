@@ -76,6 +76,39 @@ export interface AssessmentState {
   ledger: InvestigationLedger
 }
 
+export function groundAssessmentInEvidence(
+  state: AssessmentState,
+  assessment?: InvestigationAssessment,
+): InvestigationAssessment {
+  if (assessment) {
+    const assessedIds = new Set(assessment.assessments.map((item) => item.hypothesisId))
+    if (assessedIds.size !== state.hypotheses.length) {
+      throw new Error("Investigator must assess every proposed hypothesis exactly once")
+    }
+  }
+  const baseline = baselineEvidence(state.evidence)
+  const confirmed = state.hypotheses.filter((hypothesis) => state.evidence.some((entry) =>
+    entry.hypothesisId === hypothesis.id && isCausal(entry, baseline)))
+  if (confirmed.length !== 1) {
+    throw new Error("Investigation must produce exactly one causally confirmed hypothesis")
+  }
+  const confirmedHypothesis = confirmed[0]
+  return {
+    assessments: state.hypotheses.map((hypothesis) => {
+      const status = hypothesis.id === confirmedHypothesis.id ? "confirmed" : "rejected"
+      return {
+        explanation: status === "confirmed"
+          ? `Controlled evidence confirmed this prediction: ${hypothesis.prediction}`
+          : `Controlled evidence did not confirm this prediction: ${hypothesis.prediction}`,
+        hypothesisId: hypothesis.id,
+        status,
+      }
+    }),
+    conclusion: `Controlled evidence confirms this causal hypothesis: ${confirmedHypothesis.statement}`,
+    conclusionHypothesisId: confirmedHypothesis.id,
+  }
+}
+
 function completedTrials(entry: ExperimentEvidence): number {
   return entry.result.passed + entry.result.failed
 }

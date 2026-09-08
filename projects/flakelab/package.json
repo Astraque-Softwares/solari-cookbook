@@ -1,6 +1,6 @@
 {
   "name": "flakelab",
-  "version": "0.1.11",
+  "version": "0.1.15",
   "description": "Find, reproduce, and prove fixes for flaky Playwright tests.",
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,7 @@
   },
   "packageManager": "pnpm@11.6.0",
   "bin": {
-    "flakelab": "./bin/flakelab.mjs"
+    "flakelab": "bin/flakelab.mjs"
   },
   "files": [
     "dist",

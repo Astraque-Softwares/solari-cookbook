@@ -85,7 +85,8 @@ npx flakelab@latest prove tests/checkout.spec.ts \
 
 `prove` runs discovery, replay, investigation, repair, and reporting as one bounded
 pipeline. The candidate is returned as `candidate.diff` and is **never** applied to your
-local checkout.
+local checkout. To keep the reproducer somewhere else, pass
+`--reproducer .flakelab/runs/checkout.repro.yaml`; the complete pipeline uses that same path.
 
 ## What you end up with
 

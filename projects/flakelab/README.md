@@ -48,6 +48,45 @@ retained; unmarked directories are always treated as user-owned and are never re
 Every scan target is deliberate: `flakelab .` is the shortest whole-project form, while the
 spelled-out `flakelab scan` command requires its target and never silently substitutes `.`.
 
+## Proof in other repositories
+
+Run FlakeLab from the package containing your Playwright configuration. Remote proof no longer
+requires FlakeLab's own `src`, `tests`, TypeScript configuration, or pnpm scripts. It copies the
+target workspace, preserves monorepo siblings, installs dependencies at the workspace root,
+and runs the proof from the selected package. The proof runner is installed separately from
+the application and uses the target's Playwright installation and browsers.
+
+The package manager comes from `packageManager`, then the lockfile (npm, pnpm, Yarn, or Bun).
+Pin `packageManager` to an exact version for repeatable setup. Existing lockfiles use frozen
+installation. Yarn installs use the `node-modules` linker for the isolated proof workspace.
+Configured `typecheck` and `lint` scripts run from the selected package, falling back to root
+scripts. Missing checks are reported as **not configured**, not as passed or failed.
+
+For application-specific preparation, declare existing package scripts in the selected
+package's `package.json`; these run in order after dependency installation:
+
+```json
+{
+  "flakelab": {
+    "proof": {
+      "node": "22",
+      "setup": ["build:browser"]
+    }
+  }
+}
+```
+
+Node defaults to 22; `node` accepts a major or an exact version. Setup is optional, and
+FlakeLab does not guess a build command. Use Playwright's `webServer` configuration to manage
+the application server. Databases, private registries, and external services still require
+explicit project setup; this is not a promise that every repository runs without configuration.
+Provider keys and local environment variables are not forwarded to the remote application.
+
+Git projects copy tracked and non-ignored untracked files; non-Git projects are also supported.
+Dependencies, known credential files, and FlakeLab/test artifacts are excluded. Yarn configs
+containing authentication settings are rejected, as are symlinks. Snapshots are bounded to
+20,000 files and 100 MiB, and temporary copies are removed after proof, including on failure.
+
 ## Analyze an existing CI failure
 
 Point FlakeLab at a Playwright blob-report archive or a directory of shard archives:
@@ -103,6 +142,10 @@ Proof mode requires `GROQ_API_KEY` and `SOLARI_API_KEY`. It chains trigger disco
 verification, bounded AI investigation, candidate generation, proof in a disposable Solari
 microVM, and the offline evidence report. The candidate remains a reviewable diff and is never
 applied automatically.
+
+Pass `--reproducer <path>` to use a custom reproducer location throughout discovery, replay,
+investigation, repair, and reporting. The combined `prove` command does not accept a separate
+`--output` path.
 
 See every command and its accepted options without running tests:
 

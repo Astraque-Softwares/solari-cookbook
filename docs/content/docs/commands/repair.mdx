@@ -22,7 +22,7 @@ Groq, and Solari intervals show a small `working...` pulse; redirected and CI ou
 | `--reproducer <path>` | `flakelab.repro.yaml` | Reproducer used in hostile proof. |
 | `--patch <path>` | `candidate.diff` | Output candidate diff. |
 | `--proof <path>` | `flakelab.proof.json` | Output proof matrix. |
-| `--concurrency <n>` | `2` | Playwright workers inside proof. |
+| `--concurrency <n>` | `1` | Playwright workers inside proof. Raise only when the suite safely shares resources. |
 | `--max-seconds <number>` | `90` | Candidate-generation time ceiling. |
 | `--model <name>` | `qwen/qwen3.8-27b` | Groq model identifier. |
 | `--max-cost <usd>` | `0.25` | Candidate-generation spend ceiling. |

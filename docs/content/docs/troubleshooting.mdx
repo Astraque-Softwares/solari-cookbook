@@ -30,8 +30,9 @@ If the control arm is itself noisy, the acceptance gate will not clear. Options:
 
 ## The suite behaves differently with concurrency
 
-The default is one worker because arbitrary projects may share ports, databases, accounts,
-or files.
+Most commands default to two workers for a practical speed/isolation balance; isolated repair
+proof defaults to one. Set `--concurrency 1` whenever a project shares ports, databases,
+accounts, or files unsafely.
 
 Use [`worker-pressure` or `shared-state-interference`](/docs/faults/concurrency) to
 investigate this deliberately, rather than raising `--concurrency` during an unrelated

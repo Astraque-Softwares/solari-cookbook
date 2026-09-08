@@ -1,5 +1,6 @@
-import { stat } from "node:fs/promises"
-import { isAbsolute, relative, resolve, sep } from "node:path"
+import { readFile, stat } from "node:fs/promises"
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
+import { z } from "zod"
 
 import { portableProjectPath } from "../artifacts/paths.js"
 import {
@@ -29,6 +30,11 @@ import {
 } from "../diagnosis/solari-handoff.js"
 import { formatDiagnosisSummary } from "../diagnosis/summary.js"
 import { discoverRepairSourceCandidates } from "../investigator/safe-source.js"
+import type { RequiredExperimentEvidence } from "../investigator/agent.js"
+import {
+  experimentConditionSchema,
+  experimentResultSchema,
+} from "../investigator/schema.js"
 import { preflightProofCredentials } from "../proof/preflight.js"
 import { redactText } from "../report/redaction.js"
 import { writeStdout } from "../ui/console.js"
@@ -38,6 +44,11 @@ import {
   positiveNumberOption,
 } from "./options.js"
 import type { DiagnoseOptions } from "./options.js"
+
+const discoveryEvidenceSchema = z.object({
+  trigger: experimentConditionSchema,
+  triggerResult: experimentResultSchema,
+})
 
 function shouldRunScan(
   target: string | undefined,
@@ -136,10 +147,29 @@ async function runDiscoveryStage(context: DiagnosisContext): Promise<void> {
   })
 }
 
+async function readRequiredExperimentEvidence(
+  context: DiagnosisContext,
+): Promise<RequiredExperimentEvidence | undefined> {
+  const reproducer = context.checkpoint.artifacts.reproducer
+  if (!reproducer) {
+    return undefined
+  }
+  const reproducerPath = resolve(context.projectRoot, reproducer)
+  const discoveryPath = resolve(
+    dirname(reproducerPath),
+    `${basename(reproducerPath, extname(reproducerPath))}.discovery.json`,
+  )
+  const artifact = discoveryEvidenceSchema.parse(JSON.parse(
+    await readFile(discoveryPath, { encoding: "utf8" }),
+  ))
+  return { condition: artifact.trigger, result: artifact.triggerResult }
+}
+
 async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
   const { projectRoot, target, values } = context
   const { investigate } = await import("./investigate.js")
   const startedAt = Date.now()
+  const requiredEvidence = await readRequiredExperimentEvidence(context)
   const report = await investigate(target ?? "", {
     concurrency: values.concurrency,
     "max-cost": values["max-cost"],
@@ -155,17 +185,17 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
     report: values.evidence,
     seed: values.seed,
     trials: values.trials,
-  })
+  }, requiredEvidence)
   context.checkpoint.artifacts.evidence = portableProjectPath(projectRoot, values.evidence)
   addDiagnosisUsage(context, {
     aiEstimatedCostUsd: report.usage.estimatedCostUsd,
     aiInputTokens: report.usage.inputTokens,
     aiOutputTokens: report.usage.outputTokens,
     elapsedMilliseconds: Date.now() - startedAt,
-    executions: report.experiments.reduce(
+    executions: Math.max(0, report.experiments.reduce(
       (total, experiment) => total + experiment.result.trials,
       0,
-    ),
+    ) - (requiredEvidence?.result.trials ?? 0)),
   })
 }
 
@@ -174,7 +204,7 @@ async function runRepairStage(context: DiagnosisContext): Promise<DiagnosisStage
   const { repair } = await import("./repair.js")
   const startedAt = Date.now()
   const result = await repair(values.evidence, {
-    concurrency: values.concurrency,
+    concurrency: "1",
     "max-cost": values["max-cost"],
     "max-seconds": values["max-seconds"],
     model: values.model,

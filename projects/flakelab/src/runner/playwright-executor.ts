@@ -121,7 +121,10 @@ export function normalizeFailureOutput(value: string): string {
     ? [normalizedTestLine, ...diagnosticLines]
     : diagnosticLines
   if (selected.length === 0) {
-    return "playwright-exit-failure"
+    const fallback = lines
+      .filter((line) => /error|failed|not found|cannot|enoent|timed out|webserver|exit code/iu.test(line))
+      .slice(-6)
+    return fallback.length > 0 ? fallback.join("\n") : "playwright-exit-failure"
   }
   return selected
     .join("\n")
@@ -233,7 +236,9 @@ export function createPlaywrightExecutor(
     }
     const outputDirectory = trialOutputDirectory(projectRoot, runId, trial)
     await mkdir(outputDirectory, { recursive: true })
-    const reportPath = join(outputDirectory, "flakelab-trial-report.json")
+    // Playwright empties its output directory when a run starts, so reporter
+    // coordination must live beside that directory rather than inside it.
+    const reportPath = `${outputDirectory}.report.json`
     const faults = trialFaultSetSchema.parse(trial.faults)
     const browserFaults = faults.filter((fault) => !isRunnerExecutionFault(fault))
     const executionControls = runnerExecutionControls(faults)

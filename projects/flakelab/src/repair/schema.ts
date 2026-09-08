@@ -51,8 +51,8 @@ export const proofOfFixSchema = z.object({
     path: z.string().min(1).max(500),
   })).min(1).max(3),
   staticChecks: z.object({
-    typecheck: z.boolean(),
-    lint: z.boolean(),
+    typecheck: z.boolean().nullable(),
+    lint: z.boolean().nullable(),
   }),
   staticDiagnostics: z.object({
     typecheck: z.string().max(2_000).optional(),

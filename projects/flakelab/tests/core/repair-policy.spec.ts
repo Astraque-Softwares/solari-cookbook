@@ -40,7 +40,7 @@ test("repair policy permits a narrow application edit", async ({
 
   await expect(validateCandidatePatch(
     process.cwd(),
-    resolve(fixtureRoot, testPath),
+    `${resolve(fixtureRoot, testPath)}:12:3`,
     [resolve(fixtureRoot, appPath).replaceAll("\\", "/")],
     candidate,
   )).resolves.toEqual(candidate)

@@ -38,6 +38,23 @@ test("a temporary project bridge loads configs from paths containing spaces", as
   await bridge.remove()
 })
 
+test("reduced motion reaches pages created directly from the browser fixture", async () => {
+  const projectRoot = process.cwd()
+  const bridge = await createTemporaryProjectBridge(
+    projectRoot,
+    join(projectRoot, "src/runner/trial-reporter.ts"),
+    [{ kind: "reduced-motion", pattern: "**/*" }],
+  )
+  try {
+    const source = await readFile(bridge.configPath, "utf8")
+    expect(source).toContain('const launchFaultArgs = ["--force-prefers-reduced-motion"]')
+    expect(source).toContain("args: [...(use.launchOptions?.args ?? []), ...launchFaultArgs]")
+    expect(source).toContain("retries: 0")
+  } finally {
+    await bridge.remove()
+  }
+})
+
 test("an elapsed-time ceiling aborts work with an actionable error", async () => {
   await expect(withInterruption(
     (signal) => new Promise<void>((resolve) => {

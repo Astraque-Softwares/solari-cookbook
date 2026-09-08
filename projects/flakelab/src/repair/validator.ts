@@ -21,7 +21,7 @@ interface ValidationOptions {
 }
 
 const TEST_FILE = /\.(?:spec|test)\.[cm]?[jt]sx?$/u
-const MAX_REGRESSION_SELECTORS = 50
+const MAX_REGRESSION_SELECTORS = 5
 const SKIPPED_DIRECTORIES = new Set([".flakelab", ".git", "node_modules"])
 
 async function evaluate(
@@ -44,7 +44,7 @@ async function evaluate(
 async function collectRegressionTests(directory: string, files: string[]): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true })
   for (const entry of entries) {
-    if (files.length > MAX_REGRESSION_SELECTORS) {
+    if (files.length >= MAX_REGRESSION_SELECTORS + 1) {
       return
     }
     const path = join(directory, entry.name)
@@ -74,12 +74,7 @@ export async function nearbyRegressionSelectors(
     .filter((path) => path !== selected)
     .map((path) => relative(root, path).replaceAll("\\", "/"))
     .sort((left, right) => left.localeCompare(right))
-  if (selectors.length > MAX_REGRESSION_SELECTORS) {
-    throw new Error(
-      `Nearby regression selection exceeds the ${MAX_REGRESSION_SELECTORS}-test safety limit`,
-    )
-  }
-  return selectors
+  return selectors.slice(0, MAX_REGRESSION_SELECTORS)
 }
 
 function passes(result: ExperimentResult): boolean {
@@ -136,11 +131,12 @@ export async function validateProofOfFix(
       regressionSelectors,
       reproducer: options.reproducer,
       signal: options.signal,
-      workspaceRoot: workspace.root,
+      workspaceRoot: workspace.uploadRoot,
+      projectDirectory: workspace.projectDirectory,
     })
     const patchAccepted =
-      remote.typecheck
-      && remote.lint
+      remote.typecheck !== false
+      && remote.lint !== false
       && passes(remote.afterHostile)
       && passes(remote.afterControl)
       && remote.regressions.every((entry) => passes(entry.result))

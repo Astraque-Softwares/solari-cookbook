@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test"
 import {
   applyInvestigationAssessment,
   generateValidInvestigationAssessment,
+  groundAssessmentInEvidence,
   investigationAssessmentSchema,
   validateExperimentEvidence,
 } from "../../src/investigator/assessment.js"
@@ -102,6 +103,49 @@ test("FlakeLab binds evidence IDs instead of trusting the model to do it", () =>
   expect(report.hypotheses[0].evidenceExperimentIds).toEqual(["E3"])
   expect(report.hypotheses[1].evidenceExperimentIds).toEqual(["E2"])
   expect(report.conclusionEvidenceIds).toEqual(["E3"])
+})
+
+test("measured evidence corrects a model conclusion pointed at the rejected hypothesis", () => {
+  const state = investigationState()
+  const grounded = groundAssessmentInEvidence(state, {
+    assessments: [
+      { explanation: "Incorrect model status", hypothesisId: "H1", status: "rejected" },
+      { explanation: "Incorrect model status", hypothesisId: "H2", status: "confirmed" },
+    ],
+    conclusion: "The model selected the unsupported failed-request hypothesis",
+    conclusionHypothesisId: "H2",
+  })
+
+  expect(grounded.conclusionHypothesisId).toBe("H1")
+  expect(grounded.assessments).toEqual([
+    expect.objectContaining({ hypothesisId: "H1", status: "confirmed" }),
+    expect.objectContaining({ hypothesisId: "H2", status: "rejected" }),
+  ])
+  applyInvestigationAssessment(state, grounded)
+  expect(state.ledger.buildReport(
+    "tests/checkout.spec.ts",
+    "test-model",
+    ["tests/checkout.spec.ts"],
+    { estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 },
+  ).conclusionHypothesisId).toBe("H1")
+})
+
+test("confirmed evidence constructs the assessment without model adjudication", () => {
+  const state = investigationState()
+  const grounded = groundAssessmentInEvidence(state)
+
+  expect(grounded.conclusionHypothesisId).toBe("H1")
+  expect(grounded.assessments).toEqual([
+    expect.objectContaining({ hypothesisId: "H1", status: "confirmed" }),
+    expect.objectContaining({ hypothesisId: "H2", status: "rejected" }),
+  ])
+  applyInvestigationAssessment(state, grounded)
+  expect(state.ledger.buildReport(
+    "tests/checkout.spec.ts",
+    "test-model",
+    ["tests/checkout.spec.ts"],
+    { estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 },
+  ).conclusionEvidenceIds).toEqual(["E3"])
 })
 
 test("errored experiments stop before model assessment", () => {

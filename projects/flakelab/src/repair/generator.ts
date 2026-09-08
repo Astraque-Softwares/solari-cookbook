@@ -115,6 +115,7 @@ export async function generateCandidatePatch(
     options.projectRoot,
     options.investigation.test,
     options.sourcePaths,
+    JSON.stringify(options.investigation),
   )
   const allowedPaths = sources.map((source) => source.path)
   let prompt = patchPrompt(options.investigation, sources)

@@ -254,7 +254,7 @@ function parseRepair(args: string[]): CliInvocation {
     allowPositionals: true,
     strict: true,
     options: {
-      concurrency: DEFINITIONS.concurrency,
+      concurrency: { type: "string", default: "1" },
       "max-cost": DEFINITIONS.maxCost,
       "max-seconds": DEFINITIONS.maxSeconds,
       model: DEFINITIONS.model,

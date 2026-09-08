@@ -125,3 +125,35 @@ test("a plan must test both hypotheses with interventions", async () => {
     rules: { maxExperiments: 3, maximumDelayMs: 500 },
   })).rejects.toThrow(/non-baseline intervention/u)
 })
+
+test("a pipeline plan must repeat the intervention confirmed by discovery", async () => {
+  await expect(generateValidInvestigationPlan({
+    generate: () => Promise.resolve({
+      output: correctedPlan,
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }),
+    initialPrompt: "Plan a bounded causal investigation.",
+    maxAttempts: 1,
+    rules: {
+      maxExperiments: 3,
+      maximumDelayMs: 500,
+      requiredCondition: { kind: "reduced-motion" },
+    },
+  })).rejects.toThrow(/must include the discovered reduced-motion intervention/u)
+})
+
+test("a pipeline plan must preserve the exact discovered trigger", async () => {
+  await expect(generateValidInvestigationPlan({
+    generate: () => Promise.resolve({
+      output: correctedPlan,
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }),
+    initialPrompt: "Plan a bounded causal investigation.",
+    maxAttempts: 1,
+    rules: {
+      maxExperiments: 3,
+      maximumDelayMs: 500,
+      requiredCondition: { delayMs: 125, kind: "network-delay" },
+    },
+  })).rejects.toThrow(/must include the discovered network-delay intervention exactly/u)
+})

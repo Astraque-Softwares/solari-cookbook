@@ -92,6 +92,27 @@ pnpm exec flakelab doctor
 
 FlakeLab uses the project's existing Playwright configuration. Tests continue to import `test` and `expect` from `@playwright/test`; no FlakeLab fixture or source edit is required.
 
+### Proof across Playwright repositories
+
+Run FlakeLab from the package containing the Playwright configuration. Remote proof copies the target workspace, preserves required monorepo siblings, installs dependencies from the workspace root, and runs proof from the selected package. It does not depend on FlakeLab's own repository layout or scripts.
+
+The package manager is selected from the exact `packageManager` declaration, then from an npm, pnpm, Yarn, or Bun lockfile. Existing lockfiles use frozen installation. Configured `typecheck` and `lint` scripts run from the selected package, falling back to root scripts; missing checks are reported as not configured.
+
+Projects can declare application-specific preparation without teaching FlakeLab a repository-specific convention:
+
+```json
+{
+  "flakelab": {
+    "proof": {
+      "node": "22",
+      "setup": ["build:browser"]
+    }
+  }
+}
+```
+
+Setup scripts run after dependency installation. Playwright's `webServer` configuration should manage the application server. Databases, private registries, credentials, and external services still require explicit project setup; cross-repository support does not mean unavailable infrastructure can be inferred.
+
 ## Five-minute quick start
 
 Check the environment without running tests or consuming provider credits:
@@ -318,7 +339,7 @@ Generates one application-source candidate and proves it in a disposable Solari 
 | `--reproducer <path>`    | `flakelab.repro.yaml` | Reproducer used in hostile proof.                                 |
 | `--patch <path>`         | `candidate.diff`      | Output candidate diff.                                            |
 | `--proof <path>`         | `flakelab.proof.json` | Output proof matrix.                                              |
-| `--concurrency <n>`      | `2`                   | Playwright workers inside proof.                                  |
+| `--concurrency <n>`      | `1`                   | Playwright workers inside proof.                                  |
 | `--max-seconds <number>` | `90`                  | Candidate-generation time ceiling.                                |
 | `--model <name>`         | `qwen/qwen3.8-27b`    | Groq model identifier.                                            |
 | `--max-cost <usd>`       | `0.25`                | Candidate-generation spend ceiling.                               |

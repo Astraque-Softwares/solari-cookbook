@@ -371,7 +371,7 @@ test("runner injects viewport, reduced-motion, and animation-speed faults", asyn
     trialId: "reduced-motion",
     index: 1,
     seed: 23,
-    faults: [{ kind: "reduced-motion", pattern: "**/visual-environment" }],
+    faults: [{ kind: "reduced-motion", pattern: "**/never-matches" }],
   })
   const animation = await execute({
     trialId: "animation-speed",

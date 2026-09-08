@@ -2,6 +2,7 @@ import type { InvestigationReport } from "../investigator/schema.js"
 import type { AnalysisArtifact } from "../analysis/schema.js"
 import type { Fault } from "../domain/schema.js"
 import type { ProofOfFix } from "../repair/schema.js"
+import { checkLabel } from "../repair/summary.js"
 import type { Reproducer } from "../reproducer/schema.js"
 
 interface JobSummaryInput {
@@ -189,7 +190,7 @@ ${safeText(input.investigation.conclusion)}
 | Hostile after patch | ${ratio(input.proof.afterHostile.passed, input.proof.afterHostile.trials)} | ${(input.proof.afterHostile.failureRate * 100).toFixed(0)}% |
 | Normal after patch | ${ratio(input.proof.afterControl.passed, input.proof.afterControl.trials)} | ${(input.proof.afterControl.failureRate * 100).toFixed(0)}% |
 
-Static checks: typecheck ${input.proof.staticChecks.typecheck ? "passed" : "failed"}; lint ${input.proof.staticChecks.lint ? "passed" : "failed"}.  
+Static checks: typecheck ${checkLabel(input.proof.staticChecks.typecheck)}; lint ${checkLabel(input.proof.staticChecks.lint)}.
 Model: \`${safeText(input.investigation.model)}\`; estimated model cost: $${input.investigation.usage.estimatedCostUsd.toFixed(4)}.
 
 Source context inspected: ${input.investigation.sourcePaths.map((path) => `\`${safeText(path)}\``).join(", ")}.

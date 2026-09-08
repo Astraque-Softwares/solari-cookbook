@@ -3,6 +3,9 @@ import type { Dirent } from "node:fs"
 import { dirname, extname, relative, resolve } from "node:path"
 
 const MAX_SOURCE_BYTES = 64 * 1_024
+const MAX_APPROVED_SOURCE_BYTES = 256 * 1_024
+const MAX_INVESTIGATION_CONTEXT_BYTES = 20 * 1_024
+const MAX_REPAIR_CONTEXT_BYTES = 12 * 1_024
 const MAX_CONTEXT_FILES = 8
 const MAX_APPROVED_SOURCE_FILES = MAX_CONTEXT_FILES - 1
 const MAX_DISCOVERY_TEST_FILES = 20
@@ -10,6 +13,7 @@ const ALLOWED_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".ts", ".tsx"])
 const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*["'][^"']{8,}/iu
 const LOCAL_IMPORT = /\bfrom\s+["'](\.[^"']+)["']/gu
 const TEST_FILE = /\.(?:spec|test)\.(?:js|jsx|mjs|ts|tsx)$/iu
+const PLAYWRIGHT_LOCATION = /(\.(?:js|jsx|mjs|ts|tsx)):\d+(?::\d+)?$/iu
 
 export interface SafeSource {
   content: string
@@ -17,7 +21,7 @@ export interface SafeSource {
 }
 
 function resolveSafeSource(projectRoot: string, selector: string): string {
-  const sourcePath = resolve(projectRoot, selector)
+  const sourcePath = resolve(projectRoot, selector.replace(PLAYWRIGHT_LOCATION, "$1"))
   const pathFromRoot = relative(projectRoot, sourcePath)
   if (pathFromRoot.startsWith("..") || pathFromRoot.includes("node_modules")) {
     throw new Error("Test source must stay inside the project and outside dependencies")
@@ -106,20 +110,120 @@ async function readSafeContext(
 }
 
 export function readSafeTestContext(projectRoot: string, selector: string): Promise<SafeSource[]> {
-  return readSafeContext(projectRoot, [selector])
+  return readSafeContext(projectRoot, [selector]).then((sources) => {
+    let remainingBytes = MAX_INVESTIGATION_CONTEXT_BYTES
+    return sources.filter((source, index) => {
+      const sourceBytes = Buffer.byteLength(source.content)
+      if (sourceBytes > remainingBytes && index > 0) {
+        return false
+      }
+      remainingBytes -= sourceBytes
+      return true
+    })
+  })
 }
 
 export function readSafeRepairContext(
   projectRoot: string,
   selectedTest: string,
   approvedSourcePaths: string[],
+  relevanceText = "",
 ): Promise<SafeSource[]> {
   if (approvedSourcePaths.length > MAX_APPROVED_SOURCE_FILES) {
     throw new Error(
       `Repair accepts at most ${MAX_APPROVED_SOURCE_FILES} explicitly approved source files`,
     )
   }
-  return readSafeContext(projectRoot, [selectedTest, ...approvedSourcePaths])
+  return readBoundedRepairContext(
+    projectRoot,
+    selectedTest,
+    approvedSourcePaths,
+    relevanceText,
+  )
+}
+
+function relevanceWeights(value: string): Map<string, number> {
+  const weights = new Map<string, number>()
+  for (const match of value.toLowerCase().match(/[a-z0-9_-]{4,}/gu) ?? []) {
+    weights.set(match, (weights.get(match) ?? 0) + 1)
+  }
+  return weights
+}
+
+function relevantSourceExcerpt(content: string, clue: string, maxBytes: number): string {
+  if (Buffer.byteLength(content) <= maxBytes) {
+    return content
+  }
+  const lines = content.split("\n")
+  const weights = relevanceWeights(clue)
+  const scores = lines.map((line) => {
+    const normalized = line.toLowerCase()
+    return [...weights].reduce(
+      (score, [term, weight]) => score + (normalized.includes(term) ? weight : 0),
+      0,
+    )
+  })
+  const focus = scores.reduce(
+    (best, score, index) => score > scores[best] ? index : best,
+    0,
+  )
+  let start = focus
+  let end = focus + 1
+  let excerptBytes = Buffer.byteLength(lines[focus]) + 1
+  while (start > 0 || end < lines.length) {
+    const nextStart = start > 0 ? start - 1 : start
+    const nextEnd = end < lines.length ? end + 1 : end
+    const additions = [
+      ...(nextStart < start ? [lines[nextStart]] : []),
+      ...(nextEnd > end ? [lines[end]] : []),
+    ]
+    const addedBytes = additions.reduce((total, line) => total + Buffer.byteLength(line) + 1, 0)
+    if (excerptBytes + addedBytes > maxBytes) {
+      break
+    }
+    start = nextStart
+    end = nextEnd
+    excerptBytes += addedBytes
+  }
+  return lines.slice(start, end).join("\n")
+}
+
+async function readApprovedSource(
+  projectRoot: string,
+  selector: string,
+  clue: string,
+  maxContextBytes: number,
+): Promise<SafeSource> {
+  const sourcePath = resolveSafeSource(projectRoot, selector)
+  const sourceStats = await stat(sourcePath)
+  if (!sourceStats.isFile() || sourceStats.size > MAX_APPROVED_SOURCE_BYTES) {
+    throw new Error("Approved source must be a regular file no larger than 256 KiB")
+  }
+  const content = await readFile(sourcePath, "utf8")
+  if (SECRET_ASSIGNMENT.test(content)) {
+    throw new Error("Approved source contains a possible credential and cannot be sent to a model")
+  }
+  return {
+    content: relevantSourceExcerpt(content, clue, maxContextBytes),
+    path: relative(projectRoot, sourcePath),
+  }
+}
+
+async function readBoundedRepairContext(
+  projectRoot: string,
+  selectedTest: string,
+  approvedSourcePaths: string[],
+  relevanceText: string,
+): Promise<SafeSource[]> {
+  const testSource = await readSafeTestSource(projectRoot, selectedTest)
+  const remainingBytes = MAX_REPAIR_CONTEXT_BYTES - Buffer.byteLength(testSource.content)
+  if (remainingBytes <= 0) {
+    throw new Error("Selected test exhausts the 12 KiB repair context boundary")
+  }
+  const bytesPerSource = Math.floor(remainingBytes / Math.max(approvedSourcePaths.length, 1))
+  const approvedSources = await Promise.all(approvedSourcePaths.map((sourcePath) =>
+    readApprovedSource(projectRoot, sourcePath, relevanceText, bytesPerSource)))
+  return [testSource, ...approvedSources]
 }
 
 interface DirectoryContents {

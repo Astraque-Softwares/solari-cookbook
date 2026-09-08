@@ -45,6 +45,13 @@ export function browserContextFaultOptions(
   }
 }
 
+/** Chromium launch flags also reach contexts created directly with browser.newPage(). */
+export function browserLaunchFaultArguments(faults: readonly Fault[]): string[] {
+  return faults.some((fault) => fault.kind === "reduced-motion")
+    ? ["--force-prefers-reduced-motion"]
+    : []
+}
+
 function isPageContextFault(fault: Fault): fault is PageContextFault {
   return fault.kind === "reduced-motion" || fault.kind === "viewport"
 }

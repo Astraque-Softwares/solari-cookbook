@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { runInvestigation } from "../investigator/agent.js"
+import type { RequiredExperimentEvidence } from "../investigator/agent.js"
 import type { InvestigationReport } from "../investigator/schema.js"
 import {
   createGroqInvestigatorModel,
@@ -26,6 +27,7 @@ import {
 export async function investigate(
   selector: string,
   values: InvestigateOptions,
+  requiredEvidence?: RequiredExperimentEvidence,
 ): Promise<InvestigationReport> {
   writeStderr(formatProviderBoundary({
     credentials: ["GROQ_API_KEY"],
@@ -62,6 +64,7 @@ export async function investigate(
     outputUsdPerMillion: QWEN_OUTPUT_USD_PER_MILLION,
     pattern: values.pattern,
     projectRoot,
+    requiredEvidence,
     seed: integerOption(values.seed, "seed"),
     signal,
     test: selector,

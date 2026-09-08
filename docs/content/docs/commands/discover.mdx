@@ -21,7 +21,7 @@ sidecar.
 | `--concurrency <n>` | `2` | Playwright workers per trial batch. Use `1` for suites with unsafe shared state. |
 | `--min-rate <rate>` | `0.7` | Requested intervention failure rate, greater than 0 and at most 1. |
 | `--seed <number>` | `1` | Deterministic seed. |
-| `--max-seconds <n>` | `300` | Elapsed-time ceiling for discovery. |
+| `--max-seconds <n>` | `600` | Elapsed-time ceiling for discovery. |
 | `--output <path>` | `flakelab.repro.yaml` | Reproducer path. |
 
 Fault-specific bounds are listed in the [fault catalog](/docs/faults).
@@ -33,7 +33,7 @@ outcome, the trial duration, the pass/fail split, and how much of the time budge
 Standard output stays reserved for the JSON result.
 
 ```text
-› discovery · network-delay · bounded to 5m 0s · stable triggers receive a 12-trial confirmation
+› discovery · network-delay · bounded to 10m 0s · stable triggers receive a 12-trial confirmation
   · trial 1 · passed · 4.2s · 1 passed / 0 failed · 4.2s of 5m 0s
   · trial 2 · failed · 5.4s · 1 passed / 1 failed · 9.6s of 5m 0s
 ```

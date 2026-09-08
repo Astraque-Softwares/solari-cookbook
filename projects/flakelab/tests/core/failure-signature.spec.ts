@@ -20,3 +20,12 @@ test("failure normalization preserves the failing Playwright test identity", () 
     "[chromium] › tests\\checkout.spec.ts:<line> › completes checkout",
   )
 })
+
+test("failure normalization retains actionable runner startup errors", () => {
+  const output = [
+    "[WebServer] Starting application",
+    "Error: Process from config.webServer was not able to start. Exit code: 1",
+  ].join("\n")
+
+  expect(normalizeFailureOutput(output)).toContain("config.webServer")
+})

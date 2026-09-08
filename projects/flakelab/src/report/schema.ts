@@ -76,7 +76,7 @@ export const evidenceReportSchema = z.object({
   proof: z.object({
     accepted: z.boolean(),
     execution: z.literal("solari-microvm"),
-    staticChecks: z.object({ typecheck: z.boolean(), lint: z.boolean() }),
+    staticChecks: z.object({ typecheck: z.boolean().nullable(), lint: z.boolean().nullable() }),
     matrix: z.array(z.object({
       label: z.string().min(1),
       result: resultSchema,

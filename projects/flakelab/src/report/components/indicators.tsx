@@ -45,11 +45,13 @@ export function Tag({ label, tone }: Readonly<{
 
 export function CheckTag({ label, passed }: Readonly<{
   label: string
-  passed: boolean
+  passed: boolean | null
 }>): React.JSX.Element {
   return <span className="check" data-testid={`check-${label}`}>
     <span className="check-label">{label}</span>
-    <Tag label={passed ? "PASS" : "FAIL"} tone={passed ? "pass" : "fail"} />
+    {passed === null
+      ? <Tag label="NOT CONFIGURED" tone="open" />
+      : <Tag label={passed ? "PASS" : "FAIL"} tone={passed ? "pass" : "fail"} />}
   </span>
 }
 

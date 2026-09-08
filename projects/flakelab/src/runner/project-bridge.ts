@@ -3,7 +3,10 @@ import { basename, dirname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 
 import type { Fault } from "../domain/schema.js"
-import { browserContextFaultOptions } from "../faults/browser-context.js"
+import {
+  browserContextFaultOptions,
+  browserLaunchFaultArguments,
+} from "../faults/browser-context.js"
 
 const CONFIG_NAMES = [
   "playwright.config.ts",
@@ -53,15 +56,21 @@ function bridgeSource(
     ? `import userConfig from ${configImportPath}\n`
     : "const userConfig = {}\n"
   const contextFaults = JSON.stringify(browserContextFaultOptions(faults))
+  const launchFaultArgs = JSON.stringify(browserLaunchFaultArguments(faults))
   return `${configImport}
 const proxyServer = process.env.FLAKELAB_PROXY_URL
 const proxy = proxyServer ? { server: proxyServer } : undefined
 const contextFaults = ${contextFaults}
+const launchFaultArgs = ${launchFaultArgs}
 const withFaults = (use = {}) => ({
   ...use,
   ...contextFaults,
   ${captureTrace ? 'trace: "on",' : ""}
   contextOptions: { ...use.contextOptions, ...contextFaults },
+  launchOptions: {
+    ...use.launchOptions,
+    args: [...(use.launchOptions?.args ?? []), ...launchFaultArgs],
+  },
   ...(proxy ? { proxy } : {}),
 })
 const configuredReporters = userConfig.reporter
@@ -76,6 +85,7 @@ const projects = Array.isArray(userConfig.projects)
 
 export default {
   ...userConfig,
+  retries: 0,
   use: withFaults(userConfig.use),
   ...(projects ? { projects } : {}),
   reporter: [...reporters, [${JSON.stringify(reporterPath)}]],

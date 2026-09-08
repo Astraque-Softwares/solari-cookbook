@@ -19,7 +19,8 @@ function regressionSummary(proof: ProofOfFix): string {
     + ` · ${formatCount(failures, "failure")}`
 }
 
-function checkLabel(passed: boolean): string {
+export function checkLabel(passed: boolean | null): string {
+  if (passed === null) return "not configured"
   return passed ? "passed" : "failed"
 }
 
@@ -30,7 +31,7 @@ function proofRows(proof: ProofOfFix): DocumentRow[] {
     { label: "Clean control", value: trialSummary(proof.afterControl) },
     { label: "Regressions", value: regressionSummary(proof) },
     { label: "Typecheck", value: checkLabel(proof.staticChecks.typecheck) },
-    { label: "ESLint", value: checkLabel(proof.staticChecks.lint) },
+    { label: "Lint", value: checkLabel(proof.staticChecks.lint) },
   ]
 }
 

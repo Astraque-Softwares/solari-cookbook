@@ -40,7 +40,8 @@ confirmation before it is accepted.
 | `--max-copies <n>` | `shared-state-interference` | `4` |
 
 <Callout type="info">
-This is why `--concurrency` defaults to `1` everywhere else. Raising concurrency during an
-unrelated experiment confounds it; these two families investigate concurrency deliberately,
-with matched controls.
+Most local commands default to `--concurrency 2` for a practical speed/isolation balance;
+isolated repair proof defaults to `1`. Use `--concurrency 1` when a project shares ports,
+databases, accounts, or files unsafely. These two fault families vary concurrency deliberately
+with matched controls instead of treating worker pressure as incidental noise.
 </Callout>

@@ -36,6 +36,44 @@ test("safe context follows only bounded local source imports", async (
   ])
 })
 
+test("safe context accepts Playwright line and column selectors", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
+  const fixtureRoot = await prepareFixtureRoot(testInfo.outputPath("located-source"))
+  const testPath = resolve(fixtureRoot, "checkout.spec.ts")
+  await writeFile(testPath, "test('checkout', async () => true)\n", "utf8")
+
+  const context = await readSafeTestContext(process.cwd(), `${testPath}:108:3`)
+
+  expect(context).toHaveLength(1)
+  expect(context[0].path).toContain("checkout.spec.ts")
+})
+
+test("investigation context omits imports beyond the provider payload bound", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
+  const fixtureRoot = await prepareFixtureRoot(testInfo.outputPath("bounded-context"))
+  const testPath = resolve(fixtureRoot, "checkout.spec.ts")
+  await writeFile(
+    testPath,
+    'import { first } from "./first.js"\nimport { second } from "./second.js"\ntest(String(first + second), async () => true)\n',
+    "utf8",
+  )
+  await writeFile(resolve(fixtureRoot, "first.ts"), `export const first = "${"a".repeat(12_000)}"\n`, "utf8")
+  await writeFile(resolve(fixtureRoot, "second.ts"), `export const second = "${"b".repeat(12_000)}"\n`, "utf8")
+
+  const context = await readSafeTestContext(process.cwd(), testPath)
+  const totalBytes = context.reduce((total, source) => total + Buffer.byteLength(source.content), 0)
+
+  expect(totalBytes).toBeLessThanOrEqual(20 * 1_024)
+  expect(context.map((source) => source.path)).toEqual([
+    expect.stringContaining("checkout.spec.ts"),
+    expect.stringContaining("first.ts"),
+  ])
+})
+
 test("safe source reader bounds paths and blocks credential-like assignments", async (
   { browserName: _browserName },
   testInfo,
@@ -72,6 +110,34 @@ test("repair context includes explicitly approved application sources", async (
     expect.stringContaining("checkout.spec.ts"),
     expect.stringContaining("checkout-controller.ts"),
   ])
+})
+
+test("repair context extracts the relevant region from a large approved source", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
+  const fixtureRoot = await prepareFixtureRoot(testInfo.outputPath("large-repair-source"))
+  const testPath = resolve(fixtureRoot, "checkout.spec.ts")
+  const applicationPath = resolve(fixtureRoot, "checkout-controller.ts")
+  await writeFile(testPath, "test('checkout', async () => true)\n", "utf8")
+  await writeFile(applicationPath, [
+    ...Array.from({ length: 2_500 }, (_value, index) => `export const filler${index} = ${index}`),
+    "export const accountTitle = 'Motion Accounts'",
+    ...Array.from({ length: 2_500 }, (_value, index) => `export const tail${index} = ${index}`),
+  ].join("\n"), "utf8")
+
+  const context = await readSafeRepairContext(
+    process.cwd(),
+    `${testPath}:1`,
+    [applicationPath],
+    "Expected All Accounts but received Motion Accounts under reduced motion",
+  )
+
+  expect(context[1].content).toContain("Motion Accounts")
+  expect(context.reduce(
+    (total, source) => total + Buffer.byteLength(source.content),
+    0,
+  )).toBeLessThanOrEqual(12 * 1_024)
 })
 
 test("repair source discovery follows local imports from every test in a selected folder", async (

@@ -34,9 +34,14 @@ The default local concurrency is `2`, and discovery is bounded to 600 seconds. U
 flakelab prove tests/checkout.spec.ts \
   --fault viewport \
   --viewport-width 390 \
+  --reproducer .flakelab/runs/checkout.repro.yaml \
   --source src/checkout.ts \
   --open
 ```
+
+When `--reproducer` is supplied, that one path is used for discovery output, replay,
+investigation, repair, and reporting. There is no separate `--output` path in the combined
+pipeline.
 
 ## Stage gating
 

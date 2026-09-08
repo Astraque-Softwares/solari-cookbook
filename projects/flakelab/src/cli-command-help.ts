@@ -171,7 +171,7 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
     examples: ["flakelab repair flakelab.investigation.json --source src/checkout.ts"],
     options: [
       { label: "--source <file>", value: "Approve one application source file (repeatable)" },
-      { label: "--concurrency <n>", value: "Playwright workers inside the Solari proof (default: 2)" },
+      { label: "--concurrency <n>", value: "Independent proof processes (default: 1; avoids shared web-server ports)" },
       { label: "--max-seconds <number>", value: "Elapsed-time ceiling for candidate generation" },
       ...EVIDENCE_OPTIONS,
       ...PROVIDER_OPTIONS,

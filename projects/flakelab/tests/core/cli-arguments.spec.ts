@@ -295,7 +295,11 @@ test("repair exposes an explicit model cost ceiling", () => {
     "src/cart.ts",
   ])).toMatchObject({
     command: "repair",
-    options: { "max-cost": "0.10", source: ["src/checkout.ts", "src/cart.ts"] },
+    options: {
+      concurrency: "1",
+      "max-cost": "0.10",
+      source: ["src/checkout.ts", "src/cart.ts"],
+    },
     target: "flakelab.investigation.json",
   })
 })
@@ -324,6 +328,29 @@ test("prove works as a command and as a target shortcut", () => {
     target: "tests/checkout.spec.ts",
   })
   expect(shortcut).toEqual(command)
+})
+
+test("prove uses one custom reproducer path throughout the pipeline", () => {
+  const invocation = parseCliArguments([
+    "prove",
+    "tests/checkout.spec.ts",
+    "--reproducer",
+    ".flakelab/runs/checkout.repro.yaml",
+  ])
+
+  expect(invocation).toMatchObject({
+    command: "prove",
+    options: {
+      output: ".flakelab/runs/checkout.repro.yaml",
+      reproducer: ".flakelab/runs/checkout.repro.yaml",
+    },
+  })
+  expect(() => parseCliArguments([
+    "prove",
+    "tests/checkout.spec.ts",
+    "--output",
+    "legacy.repro.yaml",
+  ])).toThrow("Unknown option '--output'")
 })
 
 test("targetless commands enforce their input contract", () => {

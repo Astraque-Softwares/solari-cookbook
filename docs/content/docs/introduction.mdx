@@ -121,3 +121,33 @@ pnpm exec flakelab doctor
 
 FlakeLab uses the project's existing Playwright configuration. Tests continue to import
 `test` and `expect` from `@playwright/test`; no FlakeLab fixture or source edit is required.
+
+## Proof across Playwright repositories
+
+Run FlakeLab from the package containing the Playwright configuration. Remote proof copies
+the target workspace, preserves required monorepo siblings, installs dependencies at the
+workspace root, and runs from the selected package. It does not depend on FlakeLab's own
+repository layout or scripts.
+
+FlakeLab selects the package manager from an exact `packageManager` declaration, then from an
+npm, pnpm, Yarn, or Bun lockfile. Existing lockfiles use frozen installation. Configured
+`typecheck` and `lint` scripts run from the selected package, falling back to root scripts;
+missing checks are reported as not configured.
+
+Declare application-specific preparation in the selected package when the project needs it:
+
+```json
+{
+  "flakelab": {
+    "proof": {
+      "node": "22",
+      "setup": ["build:browser"]
+    }
+  }
+}
+```
+
+Setup scripts run after dependency installation. Use Playwright's `webServer` configuration
+to manage the application server. Databases, private registries, credentials, and external
+services still require explicit project setup; FlakeLab cannot infer unavailable
+infrastructure.

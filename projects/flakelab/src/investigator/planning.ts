@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 
 import {
@@ -30,6 +31,7 @@ export interface PlanGeneration {
 interface PlanRules {
   maxExperiments: number
   maximumDelayMs: number
+  requiredCondition?: z.infer<typeof experimentConditionSchema>
 }
 
 interface GenerateValidPlanOptions {
@@ -47,6 +49,25 @@ export interface ValidPlanResult {
 
 function conditionKinds(plan: InvestigationPlan): string[] {
   return plan.experiments.map((entry) => entry.condition.kind)
+}
+
+export function sameExperimentCondition(
+  left: z.infer<typeof experimentConditionSchema>,
+  right: z.infer<typeof experimentConditionSchema>,
+): boolean {
+  return isDeepStrictEqual(left, right)
+}
+
+function validateRequiredCondition(
+  plan: InvestigationPlan,
+  requiredCondition?: z.infer<typeof experimentConditionSchema>,
+): void {
+  if (requiredCondition && !plan.experiments.some((entry) =>
+    sameExperimentCondition(entry.condition, requiredCondition))) {
+    throw new Error(
+      `Investigation plan must include the discovered ${requiredCondition.kind} intervention exactly`,
+    )
+  }
 }
 
 export function validateInvestigationPlan(plan: InvestigationPlan, rules: PlanRules): void {
@@ -86,6 +107,7 @@ export function validateInvestigationPlan(plan: InvestigationPlan, rules: PlanRu
       + ` received ${kinds.join(", ")}`,
     )
   }
+  validateRequiredCondition(plan, rules.requiredCondition)
 }
 
 function repairPrompt(

@@ -5,6 +5,7 @@ import type {
   FullResult,
   Reporter,
   TestCase,
+  TestError,
   TestResult,
 } from "@playwright/test/reporter"
 
@@ -46,6 +47,13 @@ export default class FlakeLabTrialReporter implements Reporter {
           path: attachment.path,
         })
       }
+    }
+  }
+
+  onError(error: TestError): void {
+    const message = error.message?.trim()
+    if (message) {
+      this.failures.push(message.slice(0, MAX_FAILURE_LENGTH))
     }
   }
 

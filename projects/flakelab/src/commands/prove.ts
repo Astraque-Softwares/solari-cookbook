@@ -1,4 +1,5 @@
 import { formatProviderBoundary } from "../ui/boundary.js"
+import { experimentConditionSchema } from "../investigator/schema.js"
 import { preflightProofCredentials } from "../proof/preflight.js"
 import { writeStderr } from "../ui/console.js"
 import { TerminalDocument } from "../ui/document.js"
@@ -52,11 +53,14 @@ function announceCompletion(values: ProveOptions): void {
 export async function prove(target: string, values: ProveOptions): Promise<void> {
   announceBoundary(values)
   await preflightProofCredentials(values["prompt-credentials"])
-  await discover(target, values)
+  const discovery = await discover(target, values)
   await replay(values.output, values)
   ensureSuccessfulStage("Reproducer replay")
-  await investigate(target, values)
-  await repair(values.report, values)
+  await investigate(target, values, {
+    condition: experimentConditionSchema.parse(discovery.trigger),
+    result: discovery.triggerResult,
+  })
+  await repair(values.report, { ...values, concurrency: "1" })
   ensureSuccessfulStage("Candidate repair")
   await generateReport(values.report, values)
   announceCompletion(values)

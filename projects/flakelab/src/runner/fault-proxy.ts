@@ -434,7 +434,8 @@ export async function startFaultProxy(input: readonly Fault[]): Promise<FaultPro
     matches: 0,
   }))
   const sockets = new Set<Socket>()
-  const matchedFaultIndexes = new Set<number>()
+  const matchedFaultIndexes = new Set(faults.flatMap((entry) =>
+    isBrowserContextFault(entry.fault) ? [entry.index] : []))
   const bootstrapScripts = new Map<string, BootstrapScript>()
   const bootstrapScriptRoot = `/.well-known/flakelab/${randomUUID()}`
   let bootstrapScriptIndex = 0

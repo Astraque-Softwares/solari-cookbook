@@ -15,9 +15,10 @@ const FORBIDDEN_ADDITIONS = [
   "@ts-expect-error",
 ]
 const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*["'][^"']{8,}/iu
+const PLAYWRIGHT_LOCATION = /(\.(?:js|jsx|mjs|ts|tsx)):\d+(?::\d+)?$/iu
 
 function normalizedRelativePath(projectRoot: string, requestedPath: string): string {
-  const absolutePath = resolve(projectRoot, requestedPath)
+  const absolutePath = resolve(projectRoot, requestedPath.replace(PLAYWRIGHT_LOCATION, "$1"))
   const pathFromRoot = relative(projectRoot, absolutePath).replaceAll("\\", "/")
   if (pathFromRoot.startsWith("..") || pathFromRoot.includes("node_modules")) {
     throw new Error("Candidate edits must stay inside project source")
