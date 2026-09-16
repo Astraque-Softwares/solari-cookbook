@@ -15,6 +15,7 @@ const STATUS_TONES: Record<DiagnosisArtifact["status"], StatusTone> = {
 
 const STAGE_TONES: Record<DiagnosisStage, StatusTone> = {
   investigated: "success",
+  "no-signal-observed": "success",
   observed: "success",
   "repair-proven": "success",
   "repair-rejected": "failure",
@@ -80,6 +81,7 @@ function appendEvidence(document: TerminalDocument, artifact: DiagnosisArtifact,
   const artifacts: [string, string | null][] = [
     ["Analysis", artifact.artifacts.analysis],
     ["Scan", artifact.artifacts.scan],
+    ["Discovery", artifact.artifacts.discovery],
     ["Reproducer", artifact.artifacts.reproducer],
     ["Investigation", artifact.artifacts.evidence],
     ["Patch", artifact.artifacts.patch],

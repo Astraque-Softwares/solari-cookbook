@@ -44,6 +44,12 @@ const validationResultSchema = z.object({
 
 export const proofOfFixSchema = z.object({
   execution: z.literal("solari-microvm"),
+  outcome: z.enum([
+    "candidate-invalid",
+    "candidate-rejected",
+    "candidate-proven",
+    "proof-infrastructure-failed",
+  ]).optional(),
   patchAccepted: z.boolean(),
   patchPath: z.string().min(1),
   sourceLocations: z.array(z.object({
@@ -65,6 +71,11 @@ export const proofOfFixSchema = z.object({
     selector: z.string().min(1),
     result: validationResultSchema,
   })),
+  resources: z.object({
+    created: z.number().int().nonnegative(),
+    live: z.number().int().nonnegative(),
+    released: z.number().int().nonnegative(),
+  }).optional(),
 }).strict()
 
 export type CandidatePatch = z.infer<typeof candidatePatchSchema>

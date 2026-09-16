@@ -43,6 +43,10 @@ experiment.
 Run `flakelab doctor`. Confirm the required key is present and has permission and balance.
 Use `--prompt-credentials` to enter a replacement without changing `.env`.
 
+The complete repair journey needs both `GROQ_API_KEY` and `SOLARI_API_KEY`. See
+[Provider credentials](/docs/credentials) for terminal, `.env`, and CI setup without exposing
+their values.
+
 FlakeLab distinguishes authentication, permission, billing, rate limit, concurrency,
 capacity, network, timeout, and invalid-request failures rather than reporting one generic
 error.

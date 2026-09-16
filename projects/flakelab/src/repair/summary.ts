@@ -32,6 +32,10 @@ function proofRows(proof: ProofOfFix): DocumentRow[] {
     { label: "Regressions", value: regressionSummary(proof) },
     { label: "Typecheck", value: checkLabel(proof.staticChecks.typecheck) },
     { label: "Lint", value: checkLabel(proof.staticChecks.lint) },
+    ...(proof.resources ? [{
+      label: "Solari resources",
+      value: `${proof.resources.created} created · ${proof.resources.released} released · ${proof.resources.live} live`,
+    }] : []),
   ]
 }
 

@@ -18,8 +18,10 @@ interface PatchGeneratorOptions {
   maxSeconds: number
   model: LanguageModel
   projectRoot: string
+  selectedTest?: string
   signal?: AbortSignal
   sourcePaths: string[]
+  validateCandidate?: (candidate: CandidatePatch, attempt: number) => Promise<void>
 }
 
 export interface CandidateGenerationUsage {
@@ -113,7 +115,7 @@ export async function generateCandidatePatch(
 ): Promise<GeneratedCandidatePatch> {
   const sources = await readSafeRepairContext(
     options.projectRoot,
-    options.investigation.test,
+    options.selectedTest ?? options.investigation.test,
     options.sourcePaths,
     JSON.stringify(options.investigation),
   )
@@ -137,10 +139,11 @@ export async function generateCandidatePatch(
     try {
       const candidate = await validateCandidatePatch(
         options.projectRoot,
-        options.investigation.test,
+        options.selectedTest ?? options.investigation.test,
         allowedPaths,
         generated.candidate,
       )
+      await options.validateCandidate?.(candidate, attempt)
       return { candidate, usage }
     } catch (error) {
       if (attempt === 2) {

@@ -49,7 +49,7 @@ test("retains Yarn monorepo siblings and runs checks from their owning package",
       const plan = await projectPlan(copy.uploadRoot, copy.projectDirectory)
       expect(plan.install.args).toEqual(["install", "--immutable"])
       expect(plan.typecheck?.directory).toBe("packages/web")
-      expect(plan.lint).toBeUndefined()
+      expect(plan.lint).toEqual({ command: "yarn", args: ["run", "lint"], directory: "" })
       expect(plan.setup[0].args).toEqual(["run", "build:browser"])
       expect(plan.environment).toEqual(["E2E_USE_BUILD=1"])
     } finally { await copy.cleanup() }

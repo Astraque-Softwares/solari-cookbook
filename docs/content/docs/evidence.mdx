@@ -10,12 +10,15 @@ description: What FlakeLab writes, where it writes it, and how output is redacte
 | Scan | `.flakelab/runs/scan.json` | Per-test outcomes, intervals, signatures, and bounded attachment references. |
 | Analysis | `.flakelab/runs/analyze.json` | Validated CI report triage and baseline comparison. |
 | Diagnosis | `.flakelab/runs/diagnose.json` | Checkpoint, plan, actual usage, cleanup, and resumable phase state. |
-| Reproducer | `flakelab.repro.yaml` | Portable, strict fault and confirmation recipe. |
+| Reproducer | `.flakelab/runs/reproducer.yaml` | Portable, strict fault and confirmation recipe. |
 | Discovery sidecar | next to the reproducer | Candidate-by-candidate control/intervention evidence. |
-| Investigation | `flakelab.investigation.json` | Hypotheses, experiments, assessment, and bounded source context. |
-| Candidate | `candidate.diff` | Reviewable application-source patch, never auto-applied. |
-| Proof | `flakelab.proof.json` | Static checks, hostile trials, controls, regressions, and cleanup. |
-| Report | `flakelab.report.html` | Self-contained offline evidence UI. |
+| Investigation | `.flakelab/runs/investigation.json` | Hypotheses, experiments, assessment, and bounded source context. |
+| Candidate | `.flakelab/runs/candidate.diff` | Reviewable application-source patch, never auto-applied. |
+| Proof | `.flakelab/runs/proof.json` | Static checks, hostile trials, controls, regressions, and cleanup. |
+| Report | `.flakelab/runs/report.html` | Self-contained offline evidence UI. |
+
+These are the defaults for the unified `diagnose` journey. Standalone commands retain their
+explicit command-specific output defaults; pass paths when composing those commands manually.
 | Bisect | `flakelab.bisect.json` | Revision measurements, intervals, decisions, and boundary. |
 
 ## The stdout contract

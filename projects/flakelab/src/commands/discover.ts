@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises"
-import { basename, dirname, extname, resolve } from "node:path"
+import { resolve } from "node:path"
 
+import { portableProjectPath } from "../artifacts/paths.js"
 import type {
   DelayDiscoveryResult,
   DuplicationDiscoveryResult,
@@ -41,7 +42,11 @@ import {
   discoverSharedStateInterference,
   discoverWorkerPressure,
 } from "../discovery/runner-environment.js"
-import type { ExperimentResult } from "../discovery/evaluate.js"
+import {
+  NoAutomaticFaultSignalError,
+  type AutomaticFaultScreening,
+  type AutomaticScreeningCapabilities,
+} from "../discovery/automatic.js"
 import type { Fault } from "../domain/schema.js"
 import {
   browserStorageAreaSchema,
@@ -53,16 +58,33 @@ import {
   timeZoneSchema,
 } from "../domain/schema.js"
 import { writeReproducer } from "../reproducer/file.js"
-import type { Reproducer } from "../reproducer/schema.js"
 import { createPlaywrightExecutor } from "../runner/playwright-executor.js"
+import {
+  discoverRepositoryProfile,
+  repositoryEnvironment,
+  writeRepositoryProfile,
+} from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
 import type { TrialExecutor } from "../runner/playwright-executor.js"
 import { formatSeconds } from "../ui/format.js"
 import { ProgressReporter } from "../ui/progress.js"
 import { TrialProgress } from "../ui/trial-progress.js"
 import type { DiscoverOptions } from "./options.js"
 import { integerOption, positiveNumberOption, rateOption, withInterruption } from "./options.js"
+import { calibrateDiscovery } from "./discovery-calibration.js"
+import { automaticDiscoverySelection } from "./automatic-discovery-selection.js"
+import {
+  discoveryPathFor,
+  type NoSignalDiscoveryResult,
+  writeNoSignalDiscovery,
+} from "./discovery-outcome.js"
+import { discoveryFailureDetail } from "./discovery-reporting.js"
+import { buildDiscoveredReproducer } from "./discovery-reproducer.js"
 
-export type DiscoveryResult =
+export { discoveryFailureDetail } from "./discovery-reporting.js"
+export { buildDiscoveredReproducer } from "./discovery-reproducer.js"
+
+type SpecificDiscoveryResult =
   | AuthCookieDiscoveryResult
   | DelayDiscoveryResult
   | DuplicationDiscoveryResult
@@ -78,6 +100,12 @@ export type DiscoveryResult =
     kind: "shared-state-interference" | "worker-pressure"
   }>>
 
+export type DiscoveryResult = SpecificDiscoveryResult & {
+  automaticScreening?: AutomaticFaultScreening[]
+}
+
+export type DiscoveryOutcome = DiscoveryResult | NoSignalDiscoveryResult
+
 interface CommonDiscoveryOptions {
   concurrency: number
   minimumFailureRate: number
@@ -92,27 +120,6 @@ function requiredFaultOption(value: string | undefined, option: string, fault: s
     throw new Error(`${fault} requires --${option} <value>`)
   }
   return value
-}
-
-export function buildDiscoveredReproducer(
-  test: string,
-  seed: number,
-  minimumRate: number,
-  trigger: Fault,
-  triggerResult: ExperimentResult,
-): Reproducer {
-  return {
-    test,
-    seed,
-    trials: triggerResult.trials,
-    faults: [trigger],
-    expectedFailure: {
-      minimumRate,
-      ...(triggerResult.dominantFailureSignature
-        ? { signature: triggerResult.dominantFailureSignature }
-        : {}),
-    },
-  }
 }
 
 async function runEnvironmentDiscovery(
@@ -203,46 +210,11 @@ async function runRunnerDiscovery(
   return undefined
 }
 
-/**
- * Reports one line per completed trial: the running count, the outcome, how long
- * the trial took, and how much of the elapsed-time budget remains. Nothing else
- * about an individual trial reaches the terminal.
- */
-function countedExecutor(
-  executeTrial: TrialExecutor,
-  progress: TrialProgress,
-): TrialExecutor {
-  return async (trial) => {
-    const outcome = await executeTrial(trial)
-    progress.trial(outcome.status, outcome.durationMs)
-    return outcome
-  }
-}
-
-async function runDiscovery(
-  selector: string,
+async function runRequestDiscovery(
+  execute: TrialExecutor,
   values: DiscoverOptions,
-  progress: TrialProgress,
-  signal: AbortSignal,
-): Promise<DiscoveryResult> {
-  const common = {
-    concurrency: integerOption(values.concurrency, "concurrency"),
-    minimumFailureRate: rateOption(values["min-rate"]),
-    pattern: values.pattern,
-    seed: integerOption(values.seed, "seed"),
-    signal,
-    trials: integerOption(values.trials, "trials"),
-  }
-  const executeTrial = createPlaywrightExecutor(process.cwd(), selector, { signal })
-  const execute = countedExecutor(executeTrial, progress)
-  const runnerResult = await runRunnerDiscovery(execute, selector, values, common)
-  if (runnerResult) {
-    return runnerResult
-  }
-  const environmentResult = await runEnvironmentDiscovery(execute, values, common)
-  if (environmentResult) {
-    return environmentResult
-  }
+  common: CommonDiscoveryOptions,
+): Promise<SpecificDiscoveryResult | undefined> {
   if (values.fault === "network-delay") {
     return discoverNetworkDelay(execute, {
       ...common,
@@ -284,9 +256,82 @@ async function runDiscovery(
       maximumDelayMs: integerOption(values["max-delay"], "max-delay"),
     })
   }
-  throw new Error(
-    "fault must be animation-speed, auth-cookie-expiry, clock-jump, event-loop-stall, locale, network-delay, reduced-motion, resource-loading-delay, response-duplication, response-reordering, response-truncation, shared-state-interference, startup-event-delay, storage-state-delay, timezone, viewport, or worker-pressure",
+  return undefined
+}
+
+/**
+ * Reports one line per completed trial: the running count, the outcome, how long
+ * the trial took, and how much of the elapsed-time budget remains. Nothing else
+ * about an individual trial reaches the terminal.
+ */
+function countedExecutor(
+  executeTrial: TrialExecutor,
+  progress: TrialProgress,
+): TrialExecutor {
+  return async (trial) => {
+    const outcome = await executeTrial(trial)
+    progress.trial(outcome.status, outcome.durationMs)
+    return outcome
+  }
+}
+
+async function runDiscovery(
+  selector: string,
+  values: DiscoverOptions,
+  progress: TrialProgress,
+  reporter: ProgressReporter,
+  signal: AbortSignal,
+  repository: RepositoryProfile,
+  capabilities: AutomaticScreeningCapabilities,
+): Promise<DiscoveryResult> {
+  const common = {
+    capabilities,
+    concurrency: integerOption(values.concurrency, "concurrency"),
+    minimumFailureRate: rateOption(values["min-rate"]),
+    pattern: values.pattern,
+    seed: integerOption(values.seed, "seed"),
+    signal,
+    trials: integerOption(values.trials, "trials"),
+  }
+  const executeTrial = createPlaywrightExecutor(repository.executionRoot, selector, {
+    artifactRoot: repository.artifactRoot,
+    configPath: repository.playwright.configPath,
+    environment: repositoryEnvironment(repository),
+    playwrightCliPath: repository.playwright.cliPath,
+    signal,
+  })
+  const execute = countedExecutor(executeTrial, progress)
+  const automatic = await automaticDiscoverySelection(
+    execute,
+    selector,
+    values,
+    common,
+    (candidate) => reporter.step(
+      candidate.coverage === "scheduled"
+        ? `screening ${candidate.kind}`
+        : `${candidate.coverage} · ${candidate.kind} · ${candidate.reason}`,
+    ),
   )
+  const activeValues = automatic ? { ...values, fault: automatic.fault.kind } : values
+  const activeCommon = automatic ? { ...common, pattern: automatic.fault.pattern } : common
+  const runnerResult = await runRunnerDiscovery(execute, selector, activeValues, activeCommon)
+  if (runnerResult) {
+    return { ...runnerResult, ...(automatic ? { automaticScreening: automatic.screenings } : {}) }
+  }
+  const environmentResult = await runEnvironmentDiscovery(execute, activeValues, activeCommon)
+  if (environmentResult) {
+    return {
+      ...environmentResult,
+      ...(automatic ? { automaticScreening: automatic.screenings } : {}),
+    }
+  }
+  const result = await runRequestDiscovery(execute, activeValues, activeCommon)
+  if (!result) {
+    throw new Error(
+      "fault must be animation-speed, auth-cookie-expiry, auto, clock-jump, event-loop-stall, locale, network-delay, reduced-motion, resource-loading-delay, response-duplication, response-reordering, response-truncation, shared-state-interference, startup-event-delay, storage-state-delay, timezone, viewport, or worker-pressure",
+    )
+  }
+  return { ...result, ...(automatic ? { automaticScreening: automatic.screenings } : {}) }
 }
 
 function describeTrigger(result: DiscoveryResult): string {
@@ -306,10 +351,21 @@ async function runBoundedDiscovery(
   selector: string,
   values: DiscoverOptions,
   progress: TrialProgress,
+  reporter: ProgressReporter,
   maxSeconds: number,
+  repository: RepositoryProfile,
+  capabilities: AutomaticScreeningCapabilities,
 ): Promise<DiscoveryResult> {
   return withInterruption(
-    async (signal) => runDiscovery(selector, values, progress, signal),
+    async (signal) => runDiscovery(
+      selector,
+      values,
+      progress,
+      reporter,
+      signal,
+      repository,
+      capabilities,
+    ),
     {
       maxSeconds,
       timeoutMessage: `Discovery stopped after reaching --max-seconds ${maxSeconds}`,
@@ -324,28 +380,28 @@ async function reportedDiscovery(
   maxSeconds: number,
   plannedTrials: number | undefined,
   reporter: ProgressReporter,
+  repository: RepositoryProfile,
+  capabilities: AutomaticScreeningCapabilities,
 ): Promise<DiscoveryResult> {
   try {
-    return await runBoundedDiscovery(selector, values, progress, maxSeconds)
+    return await runBoundedDiscovery(
+      selector,
+      values,
+      progress,
+      reporter,
+      maxSeconds,
+      repository,
+      capabilities,
+    )
   } catch (error) {
+    if (error instanceof NoAutomaticFaultSignalError) {
+      reporter.done(`no signal observed · ${progress.completed} screening trials`)
+      throw error
+    }
     const timedOut = error instanceof Error && error.message.includes("--max-seconds")
     reporter.fail(discoveryFailureDetail(timedOut, progress.completed, plannedTrials))
     throw error
   }
-}
-
-export function discoveryFailureDetail(
-  timedOut: boolean,
-  completedTrials: number,
-  plannedTrials: number | undefined,
-): string {
-  if (!timedOut) {
-    return `no confirmed trigger · ${completedTrials} trials`
-  }
-  const progress = plannedTrials === undefined
-    ? `${completedTrials} trials`
-    : `${completedTrials} of ${plannedTrials} planned trials`
-  return `incomplete · ${progress}`
 }
 
 function plannedDiscoveryTrials(values: DiscoverOptions): number | undefined {
@@ -358,26 +414,65 @@ function plannedDiscoveryTrials(values: DiscoverOptions): number | undefined {
   )
 }
 
-export async function discover(selector: string, values: DiscoverOptions): Promise<DiscoveryResult> {
-  const projectRoot = process.cwd()
+export async function discover(
+  selector: string,
+  inputValues: DiscoverOptions,
+  repository?: RepositoryProfile,
+  capabilities: AutomaticScreeningCapabilities = { selectedTestCount: 1 },
+): Promise<DiscoveryOutcome> {
+  const ownsProfile = repository === undefined
+  const profile = repository ?? await discoverRepositoryProfile({
+    artifactDirectory: ".flakelab/runs",
+    config: inputValues.config,
+    invocationRoot: process.cwd(),
+    target: selector,
+  })
+  if (ownsProfile) await writeRepositoryProfile(profile, ".flakelab/runs")
+  const projectRoot = profile.artifactRoot
+  selector = profile.playwright.target
+  const requestedMaxSeconds = positiveNumberOption(inputValues["max-seconds"], "max-seconds")
+  const calibrated = await calibrateDiscovery(
+    selector,
+    inputValues,
+    profile,
+    requestedMaxSeconds,
+  )
+  const values = calibrated.values
   const outputPath = resolve(projectRoot, values.output)
   const seed = integerOption(values.seed, "seed")
   const minimumFailureRate = rateOption(values["min-rate"])
-  const maxSeconds = positiveNumberOption(values["max-seconds"], "max-seconds")
+  const maxSeconds = Math.max(1, requestedMaxSeconds - calibrated.elapsedSeconds)
   const reporter = new ProgressReporter()
   reporter.start(
     `discovery · ${values.fault}`,
     `bounded to ${formatSeconds(maxSeconds)} · stable triggers receive a 12-trial confirmation`,
   )
   const progress = new TrialProgress(reporter, maxSeconds)
-  const result = await reportedDiscovery(
-    selector,
-    values,
-    progress,
-    maxSeconds,
-    plannedDiscoveryTrials(values),
-    reporter,
-  )
+  let result: DiscoveryResult
+  try {
+    result = await reportedDiscovery(
+      selector,
+      values,
+      progress,
+      maxSeconds,
+      plannedDiscoveryTrials(values),
+      reporter,
+      profile,
+      capabilities,
+    )
+  } catch (error) {
+    if (!(error instanceof NoAutomaticFaultSignalError)) throw error
+    const { discoveryPath, result: noSignal } = await writeNoSignalDiscovery(
+      outputPath,
+      error.screenings,
+    )
+    console.log(JSON.stringify({
+      discoveryPath: portableProjectPath(projectRoot, discoveryPath),
+      status: noSignal.status,
+      trials: noSignal.trials,
+    }, null, 2))
+    return noSignal
+  }
   reporter.done(`${describeTrigger(result)} · ${progress.completed} trials`)
   await writeReproducer(outputPath, buildDiscoveredReproducer(
     selector,
@@ -386,18 +481,15 @@ export async function discover(selector: string, values: DiscoverOptions): Promi
     result.trigger,
     result.triggerResult,
   ))
-  const discoveryPath = resolve(
-    dirname(outputPath),
-    `${basename(outputPath, extname(outputPath))}.discovery.json`,
-  )
+  const discoveryPath = discoveryPathFor(outputPath)
   await writeFile(discoveryPath, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8" })
   console.log(JSON.stringify({
     baseline: result.baseline,
     experiments: result.experiments.length,
     ...("minimumDelayMs" in result ? { minimumDelayMs: result.minimumDelayMs } : {}),
     ...("minimumDurationMs" in result ? { minimumDurationMs: result.minimumDurationMs } : {}),
-    reproducerPath: outputPath,
-    discoveryPath,
+    reproducerPath: portableProjectPath(projectRoot, outputPath),
+    discoveryPath: portableProjectPath(projectRoot, discoveryPath),
     trigger: result.trigger,
     triggerResult: result.triggerResult,
   }, null, 2))

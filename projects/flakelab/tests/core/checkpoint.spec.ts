@@ -51,6 +51,7 @@ function checkpoint() {
   return diagnosisArtifactSchema.parse({
     artifacts: {
       analysis: null,
+      discovery: null,
       evidence: null,
       html: null,
       patch: null,
@@ -107,6 +108,7 @@ function checkpoint() {
 test("resume planning starts after the last completed phase", () => {
   const observed = checkpoint()
   expect(nextDiagnosisPhase(observed)).toBe("discover")
+  expect(nextDiagnosisPhase({ ...observed, stage: "no-signal-observed" })).toBe("complete")
   expect(nextDiagnosisPhase({ ...observed, stage: "reproducer-created" })).toBe("investigate")
   expect(nextDiagnosisPhase({ ...observed, stage: "investigated" })).toBe("repair")
   expect(nextDiagnosisPhase({ ...observed, stage: "repair-proven" })).toBe("complete")

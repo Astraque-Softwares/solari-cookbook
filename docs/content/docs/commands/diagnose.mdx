@@ -48,11 +48,12 @@ automation cannot hang.
 | `--investigate` | off | Explicitly enable bounded Groq investigation. |
 | `--repair` | off | Explicitly enable candidate generation and Solari proof. |
 | `--source <file>` | none | Approve an application source file; repeat up to seven times. |
-| `--evidence <path>` | `flakelab.investigation.json` | Investigation artifact. |
-| `--reproducer <path>` | `flakelab.repro.yaml` | Shared discovery output and proof-pipeline reproducer. |
-| `--patch <path>` | `candidate.diff` | Candidate diff. |
-| `--proof <path>` | `flakelab.proof.json` | Proof matrix. |
-| `--html <path>` | `flakelab.report.html` | Portable report. |
+| `--artifacts <dir>` | `.flakelab/runs` | Root for all default diagnosis artifacts. |
+| `--evidence <path>` | `<artifacts>/investigation.json` | Investigation artifact. |
+| `--reproducer <path>` | `<artifacts>/reproducer.yaml` | Shared discovery output and proof-pipeline reproducer. |
+| `--patch <path>` | `<artifacts>/candidate.diff` | Candidate diff. |
+| `--proof <path>` | `<artifacts>/proof.json` | Proof matrix. |
+| `--html <path>` | `<artifacts>/report.html` | Portable report. |
 | `--open` | off | Open the generated report without prompting. |
 | `--model <name>` | `qwen/qwen3.8-27b` | Groq model identifier. |
 | `--max-cost <usd>` | `0.25` | Model spend ceiling checked before work starts. |

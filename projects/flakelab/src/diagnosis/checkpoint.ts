@@ -16,6 +16,7 @@ export function nextDiagnosisPhase(checkpoint: DiagnosisArtifact): DiagnosisPhas
   const workflow = checkpoint.input.options
   const phases: Record<DiagnosisArtifact["stage"], DiagnosisPhase> = {
     investigated: workflow.repair ? "repair" : "complete",
+    "no-signal-observed": "complete",
     observed: workflow.discover || workflow.investigate || workflow.repair
       ? "discover"
       : "complete",

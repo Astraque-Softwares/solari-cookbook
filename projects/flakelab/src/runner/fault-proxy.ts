@@ -19,27 +19,26 @@ import {
   injectDocumentBootstrap,
   isDocumentBootstrapFault,
 } from "../faults/document-bootstrap.js"
+import { observeProxyRequest } from "./request-observation.js"
+import type { ObservedRequest } from "./request-observation.js"
 
 export interface FaultProxy {
   close: () => Promise<void>
+  observedRequests: () => ObservedRequest[]
   unmatchedFaults: () => Fault[]
   url: string
 }
-
 interface CompiledFault {
   expression: RegExp
   fault: Fault
   index: number
   matches: number
 }
-
 type CompiledAuthFault = CompiledFault & { fault: AuthCookieExpiryFault }
-
 interface BootstrapScript {
   faultIndexes: number[]
   source: string
 }
-
 class TruncateTailTransform extends Transform {
   private tail = Buffer.alloc(0)
 
@@ -414,6 +413,10 @@ function tunnelConnect(
 ): void {
   const destination = new URL(`http://${request.url ?? ""}`)
   const upstream = connect(Number(destination.port || "443"), destination.hostname)
+  client.on("error", () => upstream.destroy())
+  upstream.on("error", () => client.destroy())
+  client.once("close", () => upstream.destroy())
+  upstream.once("close", () => client.destroy())
   upstream.once("connect", () => {
     client.write("HTTP/1.1 200 Connection Established\r\n\r\n")
     if (head.length > 0) {
@@ -422,11 +425,11 @@ function tunnelConnect(
     upstream.pipe(client)
     client.pipe(upstream)
   })
-  upstream.once("error", () => client.destroy())
 }
 
 export async function startFaultProxy(input: readonly Fault[]): Promise<FaultProxy> {
-  const validatedFaults = faultSetSchema.parse(input)
+  const validatedFaults = input.length === 0 ? [] : faultSetSchema.parse(input)
+  const observedRequests = new Map<string, ObservedRequest>()
   const faults = validatedFaults.map((fault, index): CompiledFault => ({
     expression: compileUrlPattern(fault.pattern),
     fault,
@@ -455,6 +458,12 @@ export async function startFaultProxy(input: readonly Fault[]): Promise<FaultPro
     return path
   }
   const server = createServer((request, response) => {
+    const observed = observeProxyRequest(request)
+    if (observed) {
+      const key = `${observed.method}:${observed.url}`
+      const previous = observedRequests.get(key)
+      observedRequests.set(key, { ...observed, count: (previous?.count ?? 0) + 1 })
+    }
     handleRequest(request, response, faults, bootstrapScripts, registerBootstrapScript, (index) => {
       matchedFaultIndexes.add(index)
     }).catch((error: Error) => failResponse(response, error))
@@ -482,6 +491,7 @@ export async function startFaultProxy(input: readonly Fault[]): Promise<FaultPro
         server.close((error) => error ? reject(error) : complete())
       })
     },
+    observedRequests: () => [...observedRequests.values()],
     unmatchedFaults: () => validatedFaults.filter((_fault, index) =>
       !matchedFaultIndexes.has(index)),
     url: `http://127.0.0.1:${address.port}`,

@@ -39,6 +39,11 @@ function occurrences(content: string, snippet: string): number {
   return count
 }
 
+function matchSourceLineEndings(snippet: string, source: string): string {
+  const lineEnding = source.includes("\r\n") ? "\r\n" : "\n"
+  return snippet.replaceAll(/\r\n|\r|\n/gu, lineEnding)
+}
+
 function onlyRaisesNumericLimits(before: string, after: string): boolean {
   const beforeNumbers = [...before.matchAll(/\d+/gu)].map((match) => Number(match[0]))
   const afterNumbers = [...after.matchAll(/\d+/gu)].map((match) => Number(match[0]))
@@ -59,24 +64,28 @@ export async function validateCandidatePatch(
   const candidate = candidatePatchSchema.parse(value)
   const normalizedTest = normalizedRelativePath(projectRoot, selectedTest)
   const allowed = new Set(allowedSourcePaths.map((path) => normalizedRelativePath(projectRoot, path)))
+  const normalizedEdits: CandidatePatch["edits"] = []
   for (const edit of candidate.edits) {
     const path = normalizedRelativePath(projectRoot, edit.path)
     if (path === normalizedTest || !allowed.has(path)) {
       throw new Error(`Candidate cannot edit unapproved source: ${path}`)
     }
-    if (FORBIDDEN_ADDITIONS.some((token) => edit.after.includes(token) && !edit.before.includes(token))) {
+    const content = await readFile(resolve(projectRoot, path), "utf8")
+    const before = matchSourceLineEndings(edit.before, content)
+    const after = matchSourceLineEndings(edit.after, content)
+    if (FORBIDDEN_ADDITIONS.some((token) => after.includes(token) && !before.includes(token))) {
       throw new Error(`Candidate introduces a forbidden test-weakening construct in ${path}`)
     }
-    if (SECRET_ASSIGNMENT.test(edit.after)) {
+    if (SECRET_ASSIGNMENT.test(after)) {
       throw new Error(`Candidate introduces a possible credential in ${path}`)
     }
-    if (onlyRaisesNumericLimits(edit.before, edit.after)) {
+    if (onlyRaisesNumericLimits(before, after)) {
       throw new Error(`Candidate only raises a numeric timing limit in ${path}`)
     }
-    const content = await readFile(resolve(projectRoot, path), "utf8")
-    if (occurrences(content, edit.before) !== 1) {
+    if (occurrences(content, before) !== 1) {
       throw new Error(`Candidate edit must match exactly one source location in ${path}`)
     }
+    normalizedEdits.push({ ...edit, after, before })
   }
-  return candidate
+  return { ...candidate, edits: normalizedEdits }
 }

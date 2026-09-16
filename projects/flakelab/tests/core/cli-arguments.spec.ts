@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { join } from "node:path"
 
 import { parseCliArguments } from "../../src/cli-arguments.js"
 
@@ -43,6 +44,7 @@ test("discover selects a bounded fault family explicitly", () => {
       fault: "response-truncation",
       "max-remove-bytes": "64",
       "max-seconds": "600",
+      pattern: "auto",
     },
   })
   expect(parseCliArguments([
@@ -229,17 +231,38 @@ test("analyze accepts one report source and only its own options", () => {
 })
 
 test("diagnose accepts a target or a read-only report and gates new experiments", () => {
-  expect(parseCliArguments(["diagnose", "tests/checkout.spec.ts"])).toMatchObject({
+  const defaultInvocation = parseCliArguments(["diagnose", "tests/checkout.spec.ts"])
+  expect(defaultInvocation).toMatchObject({
     command: "diagnose",
     options: {
+      artifacts: ".flakelab/runs",
       concurrency: "2",
       discover: false,
+      evidence: join(".flakelab/runs", "investigation.json"),
+      html: join(".flakelab/runs", "report.html"),
       investigate: false,
       "max-seconds": "600",
       "max-steps": "4",
+      patch: join(".flakelab/runs", "candidate.diff"),
+      proof: join(".flakelab/runs", "proof.json"),
       repair: false,
+      reproducer: join(".flakelab/runs", "reproducer.yaml"),
     },
     target: "tests/checkout.spec.ts",
+  })
+  expect(parseCliArguments([
+    "diagnose",
+    "tests/checkout.spec.ts",
+    "--artifacts",
+    "custom evidence",
+    "--reproducer",
+    "manual/repro.yaml",
+  ])).toMatchObject({
+    options: {
+      artifacts: "custom evidence",
+      evidence: join("custom evidence", "investigation.json"),
+      reproducer: "manual/repro.yaml",
+    },
   })
   expect(parseCliArguments([
     "diagnose",

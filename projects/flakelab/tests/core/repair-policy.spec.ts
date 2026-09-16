@@ -77,3 +77,34 @@ test("repair policy rejects test edits and numeric-only timeout increases", asyn
     }] },
   )).rejects.toThrow(/unapproved source/u)
 })
+
+test("repair policy matches model snippets to a CRLF source without changing its style", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const fixtureRoot = testInfo.outputPath("crlf-repair-policy-tests")
+  await mkdir(fixtureRoot, { recursive: true })
+  await writeFile(
+    resolve(fixtureRoot, appPath),
+    "const request = await fetch('/api/products')\r\nconst products = await request.json()\r\n",
+    "utf8",
+  )
+  await writeFile(resolve(fixtureRoot, testPath), "expect(products).toBeDefined()\r\n", "utf8")
+
+  const candidate = await validateCandidatePatch(
+    fixtureRoot,
+    testPath,
+    [appPath],
+    {
+      summary: "Validate the product response before decoding it",
+      rationale: "Incomplete responses should not be decoded as complete product data",
+      edits: [{
+        path: appPath,
+        before: "const request = await fetch('/api/products')\nconst products = await request.json()",
+        after: "const request = await fetch('/api/products')\nif (!request.ok) throw new Error('Product request failed')\nconst products = await request.json()",
+      }],
+    },
+  )
+
+  expect(candidate.edits[0].before).toContain("\r\n")
+  expect(candidate.edits[0].after).toContain("\r\n")
+})

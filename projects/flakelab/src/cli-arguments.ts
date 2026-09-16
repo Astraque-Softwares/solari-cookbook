@@ -87,6 +87,7 @@ function parseScan(args: string[]): CliInvocation {
     options: {
       artifacts: DEFINITIONS.artifacts,
       concurrency: DEFINITIONS.concurrency,
+      config: DEFINITIONS.config,
       json: DEFINITIONS.json,
       runs: DEFINITIONS.runs,
       verbose: DEFINITIONS.verbose,
@@ -98,6 +99,7 @@ function parseScan(args: string[]): CliInvocation {
     options: {
       artifacts: required(parsed.values.artifacts, "artifacts"),
       concurrency: required(parsed.values.concurrency, "concurrency"),
+      ...(parsed.values.config ? { config: parsed.values.config } : {}),
       json: required(parsed.values.json, "json"),
       runs: required(parsed.values.runs, "runs"),
       verbose: required(parsed.values.verbose, "verbose"),
@@ -114,6 +116,7 @@ function parseDiscover(args: string[]): CliInvocation {
       "animation-rate": DEFINITIONS.animationRate,
       "clock-offset-ms": DEFINITIONS.clockOffsetMs,
       concurrency: DEFINITIONS.concurrency,
+      config: DEFINITIONS.config,
       "cookie-name": DEFINITIONS.cookieName,
       fault: DEFINITIONS.fault,
       "jump-after-ms": DEFINITIONS.jumpAfterMs,
@@ -148,6 +151,7 @@ function parseDiscover(args: string[]): CliInvocation {
       "animation-rate": required(parsed.values["animation-rate"], "animation-rate"),
       "clock-offset-ms": required(parsed.values["clock-offset-ms"], "clock-offset-ms"),
       concurrency: required(parsed.values.concurrency, "concurrency"),
+      ...(parsed.values.config ? { config: parsed.values.config } : {}),
       ...(parsed.values["cookie-name"]
         ? { "cookie-name": parsed.values["cookie-name"] }
         : {}),
@@ -208,6 +212,7 @@ function parseInvestigate(args: string[]): CliInvocation {
     strict: true,
     options: {
       concurrency: DEFINITIONS.concurrency,
+      config: DEFINITIONS.config,
       "max-cost": DEFINITIONS.maxCost,
       "max-delay": DEFINITIONS.maxDelay,
       "max-experiments": DEFINITIONS.maxExperiments,
@@ -228,6 +233,7 @@ function parseInvestigate(args: string[]): CliInvocation {
     target: oneTarget(parsed.positionals, "investigate"),
     options: {
       concurrency: required(parsed.values.concurrency, "concurrency"),
+      ...(parsed.values.config ? { config: parsed.values.config } : {}),
       "max-cost": required(parsed.values["max-cost"], "max-cost"),
       "max-delay": required(parsed.values["max-delay"], "max-delay"),
       "max-experiments": required(parsed.values["max-experiments"], "max-experiments"),

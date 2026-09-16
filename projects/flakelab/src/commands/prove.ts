@@ -11,6 +11,7 @@ import type { ProveOptions } from "./options.js"
 import { repair } from "./repair.js"
 import { replay } from "./replay.js"
 import { generateReport } from "./report.js"
+import { discoverRepositoryProfile, writeRepositoryProfile } from "../project/profile.js"
 
 const PIPELINE = "discover, replay, investigate, repair, report"
 
@@ -51,17 +52,27 @@ function announceCompletion(values: ProveOptions): void {
 }
 
 export async function prove(target: string, values: ProveOptions): Promise<void> {
+  const repository = await discoverRepositoryProfile({
+    artifactDirectory: ".flakelab/runs",
+    config: values.config,
+    invocationRoot: process.cwd(),
+    target,
+  })
+  await writeRepositoryProfile(repository, ".flakelab/runs")
   announceBoundary(values)
   await preflightProofCredentials(values["prompt-credentials"])
-  const discovery = await discover(target, values)
-  await replay(values.output, values)
+  const discovery = await discover(target, values, repository)
+  if ("screenings" in discovery) {
+    throw new Error("No fault signal was observed in the applicable bounded screen")
+  }
+  await replay(values.output, values, repository)
   ensureSuccessfulStage("Reproducer replay")
   await investigate(target, values, {
     condition: experimentConditionSchema.parse(discovery.trigger),
     result: discovery.triggerResult,
-  })
-  await repair(values.report, { ...values, concurrency: "1" })
+  }, repository)
+  await repair(values.report, { ...values, concurrency: "1" }, repository)
   ensureSuccessfulStage("Candidate repair")
-  await generateReport(values.report, values)
+  await generateReport(values.report, values, repository)
   announceCompletion(values)
 }

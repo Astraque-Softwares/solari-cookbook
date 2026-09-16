@@ -1,6 +1,7 @@
 export interface ScanOptions {
   artifacts: string
   concurrency: string
+  config?: string
   json: boolean
   runs: string
   verbose: boolean
@@ -17,6 +18,7 @@ export interface DiagnoseOptions {
   artifacts: string
   baseline?: string
   concurrency: string
+  config?: string
   discover: boolean
   evidence: string
   html: string
@@ -47,6 +49,7 @@ export interface DiscoverOptions {
   "animation-rate": string
   "clock-offset-ms": string
   concurrency: string
+  config?: string
   "cookie-name"?: string
   fault: string
   "jump-after-ms": string
@@ -80,6 +83,7 @@ export interface ReplayOptions {
 
 export interface InvestigateOptions {
   concurrency: string
+  config?: string
   "max-cost": string
   "max-delay": string
   "max-experiments": string

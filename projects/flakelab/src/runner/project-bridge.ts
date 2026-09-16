@@ -98,8 +98,9 @@ export async function createTemporaryProjectBridge(
   reporterPath: string,
   faults: readonly Fault[] = [],
   captureTrace = false,
+  configuredPath?: string,
 ): Promise<TemporaryProjectBridge> {
-  const userConfigPath = await findPlaywrightConfig(projectRoot)
+  const userConfigPath = configuredPath ?? await findPlaywrightConfig(projectRoot)
   const configDirectory = userConfigPath ? dirname(userConfigPath) : projectRoot
   const configPath = join(configDirectory, `.flakelab-${randomUUID()}.config.ts`)
   await writeFile(configPath, bridgeSource(

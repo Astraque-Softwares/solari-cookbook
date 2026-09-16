@@ -298,6 +298,8 @@ test("help is scannable and every command exposes its own options", () => {
   expect(helpText("discover")).toContain("flakelab discover <test> [options]")
   expect(helpText("discover")).toContain("--fault <family>")
   expect(helpText("doctor")).toContain("flakelab doctor")
+  expect(helpText("diagnose")).toContain("<artifacts>/candidate.diff")
+  expect(helpText("diagnose")).toContain("<artifacts>/proof.json")
 })
 
 test("command help never weakens the existing argument contract", () => {

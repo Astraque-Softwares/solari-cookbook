@@ -85,6 +85,9 @@ interface MutableScanTest {
 
 export interface NativeScanOptions {
   artifactDirectory: string
+  artifactRoot?: string
+  configPath?: string
+  environment?: NodeJS.ProcessEnv
   playwrightCliPath?: string
   runs: number
   signal?: AbortSignal
@@ -124,7 +127,7 @@ export function failureConfidence(
 export function nativeScanArguments(
   playwrightCliPath: string,
   target: string,
-  options: Pick<NativeScanOptions, "runs" | "workers">,
+  options: Pick<NativeScanOptions, "configPath" | "runs" | "workers">,
   outputDirectory: string,
 ): string[] {
   return [
@@ -136,6 +139,7 @@ export function nativeScanArguments(
     "--retries=0",
     "--reporter=json",
     `--output=${outputDirectory}`,
+    ...(options.configPath ? ["--config", options.configPath] : []),
   ]
 }
 
@@ -388,8 +392,9 @@ export async function runNativePlaywrightScan(
   await mkdir(temporaryParent, { recursive: true })
   const temporaryDirectory = await mkdtemp(join(temporaryParent, "flakelab-scan-"))
   const reportPath = join(temporaryDirectory, "playwright-report.json")
+  const artifactRoot = resolve(options.artifactRoot ?? projectRoot)
   const playwrightOutputDirectory = join(
-    resolve(projectRoot, options.artifactDirectory),
+    resolve(artifactRoot, options.artifactDirectory),
     "playwright",
     randomUUID(),
   )
@@ -401,7 +406,7 @@ export async function runNativePlaywrightScan(
       cwd: projectRoot,
       detached: process.platform !== "win32",
       env: {
-        ...createPlaywrightEnvironment(),
+        ...createPlaywrightEnvironment({ ...process.env, ...options.environment }),
         PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
       },
       shell: false,
@@ -419,7 +424,7 @@ export async function runNativePlaywrightScan(
     if (earlyResult) {
       result = earlyResult
     } else {
-      result = await readCompletedReport(reportPath, execution, projectRoot)
+      result = await readCompletedReport(reportPath, execution, artifactRoot)
     }
   } finally {
     await removeTemporaryDirectory(temporaryParent, temporaryDirectory)
@@ -427,7 +432,7 @@ export async function runNativePlaywrightScan(
   return {
     ...result,
     playwrightOutputDirectory: await retainOwnedArtifacts(
-      projectRoot,
+      artifactRoot,
       playwrightOutputDirectory,
     ),
   }

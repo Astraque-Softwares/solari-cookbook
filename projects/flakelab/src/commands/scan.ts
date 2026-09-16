@@ -2,6 +2,12 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 
 import { portableProjectPath } from "../artifacts/paths.js"
+import {
+  discoverRepositoryProfile,
+  repositoryEnvironment,
+  writeRepositoryProfile,
+} from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
 import { failureConfidence, runNativePlaywrightScan } from "../runner/native-scan.js"
 import type {
   ScanArtifact,
@@ -77,8 +83,19 @@ export function summarizeScanTests(tests: ScanTestResult[]): ScanTotals {
   }
 }
 
-export async function scan(target: string, values: ScanOptions): Promise<ScanResult> {
-  const projectRoot = process.cwd()
+export async function scan(
+  target: string,
+  values: ScanOptions,
+  repository?: RepositoryProfile,
+): Promise<ScanResult> {
+  const profile = repository ?? await discoverRepositoryProfile({
+    artifactDirectory: values.artifacts,
+    config: values.config,
+    invocationRoot: process.cwd(),
+    target,
+  })
+  await writeRepositoryProfile(profile, values.artifacts)
+  const projectRoot = profile.artifactRoot
   const artifactPath = resolve(projectRoot, values.artifacts, "scan.json")
   const portableArtifactPath = portableProjectPath(projectRoot, artifactPath)
   const progress = new ProgressReporter()
@@ -89,10 +106,14 @@ export async function scan(target: string, values: ScanOptions): Promise<ScanRes
     `${formatCount(runs, "native Playwright run")} · ${formatCount(workers, "worker")}`,
   )
   const nativeResult = await withInterruption(async (signal) => runNativePlaywrightScan(
-    projectRoot,
-    target,
+    profile.executionRoot,
+    profile.playwright.target,
     {
       artifactDirectory: values.artifacts,
+      artifactRoot: profile.artifactRoot,
+      configPath: profile.playwright.configPath,
+      environment: repositoryEnvironment(profile),
+      playwrightCliPath: profile.playwright.cliPath,
       runs,
       signal,
       workers,
@@ -109,7 +130,7 @@ export async function scan(target: string, values: ScanOptions): Promise<ScanRes
     runs,
     runnerErrors: nativeResult.runnerErrors,
     status,
-    target: portableProjectPath(projectRoot, target),
+    target: profile.playwright.target,
     tests: nativeResult.tests,
     totals: summarizeScanTests(nativeResult.tests),
     workers,

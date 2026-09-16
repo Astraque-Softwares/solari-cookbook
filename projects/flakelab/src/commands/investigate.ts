@@ -10,6 +10,16 @@ import {
   QWEN_OUTPUT_USD_PER_MILLION,
 } from "../investigator/groq.js"
 import { createPlaywrightExecutor } from "../runner/playwright-executor.js"
+import {
+  discoverRepositoryProfile,
+  repositoryEnvironment,
+  writeRepositoryProfile,
+} from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
+import {
+  AUTOMATIC_REQUEST_PATTERN,
+  resolveRequestPattern,
+} from "../runner/request-target.js"
 import { requireCredential } from "../security/credentials.js"
 import { formatProviderBoundary } from "../ui/boundary.js"
 import { writeStderr } from "../ui/console.js"
@@ -24,10 +34,49 @@ import {
   withInterruption,
 } from "./options.js"
 
+function evidenceRequestPattern(
+  requiredEvidence: RequiredExperimentEvidence | undefined,
+): string | undefined {
+  if (!requiredEvidence || !("pattern" in requiredEvidence.condition)) return undefined
+  return typeof requiredEvidence.condition.pattern === "string"
+    ? requiredEvidence.condition.pattern
+    : undefined
+}
+
+async function investigationRequestPattern(
+  selector: string,
+  values: InvestigateOptions,
+  profile: RepositoryProfile,
+  requiredEvidence: RequiredExperimentEvidence | undefined,
+): Promise<string> {
+  const requested = evidenceRequestPattern(requiredEvidence) ?? values.pattern
+  if (requested !== AUTOMATIC_REQUEST_PATTERN) return requested
+  const calibration = new ProgressReporter()
+  calibration.start("request calibration", "observing the selected test without a fault")
+  try {
+    const resolved = await withInterruption(
+      async (signal) => resolveRequestPattern({
+        pattern: requested,
+        repository: profile,
+        seed: integerOption(values.seed, "seed"),
+        selector,
+        signal,
+      }),
+      { maxSeconds: integerOption(values["max-seconds"], "max-seconds") },
+    )
+    calibration.done(`${resolved.pattern} · ${resolved.candidates[0]?.reason ?? "observed request"}`)
+    return resolved.pattern
+  } catch (error) {
+    calibration.fail("no safe request target selected")
+    throw error
+  }
+}
+
 export async function investigate(
   selector: string,
   values: InvestigateOptions,
   requiredEvidence?: RequiredExperimentEvidence,
+  repository?: RepositoryProfile,
 ): Promise<InvestigationReport> {
   writeStderr(formatProviderBoundary({
     credentials: ["GROQ_API_KEY"],
@@ -41,15 +90,37 @@ export async function investigate(
     ],
     stage: "bounded Groq investigation",
   }, stderrTheme()))
+  const ownsProfile = repository === undefined
+  const profile = repository ?? await discoverRepositoryProfile({
+    artifactDirectory: ".flakelab/runs",
+    config: values.config,
+    invocationRoot: process.cwd(),
+    target: selector,
+  })
+  if (ownsProfile) await writeRepositoryProfile(profile, ".flakelab/runs")
+  const projectRoot = profile.artifactRoot
+  selector = profile.playwright.target
+  const requestPattern = await investigationRequestPattern(
+    selector,
+    values,
+    profile,
+    requiredEvidence,
+  )
   const apiKey = await requireCredential("groq", {
     forcePrompt: values["prompt-credentials"],
   })
-  const projectRoot = process.cwd()
   const progress = new ProgressReporter()
   progress.start("investigation", "planning and running causal experiments")
   const report = await withInterruption(async (signal) => runInvestigation({
     concurrency: integerOption(values.concurrency, "concurrency"),
-    execute: createPlaywrightExecutor(projectRoot, selector, { captureTrace: true, signal }),
+    execute: createPlaywrightExecutor(profile.executionRoot, selector, {
+      artifactRoot: profile.artifactRoot,
+      captureTrace: true,
+      configPath: profile.playwright.configPath,
+      environment: repositoryEnvironment(profile),
+      playwrightCliPath: profile.playwright.cliPath,
+      signal,
+    }),
     inputUsdPerMillion: QWEN_INPUT_USD_PER_MILLION,
     maxCostUsd: positiveNumberOption(values["max-cost"], "max-cost"),
     maxExperiments: integerOption(values["max-experiments"], "max-experiments"),
@@ -62,8 +133,8 @@ export async function investigate(
     modelId: values.model,
     outputTokenLimit: 512,
     outputUsdPerMillion: QWEN_OUTPUT_USD_PER_MILLION,
-    pattern: values.pattern,
-    projectRoot,
+    pattern: requestPattern,
+    projectRoot: profile.executionRoot,
     requiredEvidence,
     seed: integerOption(values.seed, "seed"),
     signal,

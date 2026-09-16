@@ -18,6 +18,9 @@ interface BuildReportOptions {
   investigation: InvestigationReport
   paths: ReportPaths
   proof: ProofOfFix
+  repository?: {
+    fingerprint: string
+  }
   reproducer: Reproducer
 }
 
@@ -202,6 +205,9 @@ export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport
   }
   return evidenceReportSchema.parse({
     generatedAt: (options.generatedAt ?? new Date()).toISOString(),
+    ...(options.repository ? {
+      repository: { drift: "unchanged", fingerprint: options.repository.fingerprint },
+    } : {}),
     status: proof.patchAccepted ? "FIX_PROVEN" : "PATCH_REJECTED",
     test: redactText(investigation.test),
     model: redactText(investigation.model),
@@ -251,6 +257,10 @@ export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport
     proof: {
       accepted: proof.patchAccepted,
       execution: proof.execution,
+      outcome: proof.outcome === "candidate-proven" || proof.outcome === "candidate-rejected"
+        ? proof.outcome
+        : undefined,
+      resources: proof.resources,
       staticChecks: proof.staticChecks,
       matrix,
     },

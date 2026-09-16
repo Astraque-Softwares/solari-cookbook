@@ -11,6 +11,8 @@ import type { Fault, TrialOutcome, TrialPlan } from "../domain/schema.js"
 import { trialFaultSetSchema } from "../domain/schema.js"
 import { portableProjectPath } from "../artifacts/paths.js"
 import { startFaultProxy } from "./fault-proxy.js"
+import type { FaultProxy } from "./fault-proxy.js"
+import type { ObservedRequest } from "./request-observation.js"
 import { createTemporaryProjectBridge } from "./project-bridge.js"
 import { isRunnerExecutionFault, runnerExecutionControls } from "./execution-fault.js"
 import type { CapturedProcessResult } from "./process-tree.js"
@@ -38,7 +40,12 @@ const trialReporterOutputSchema = z.object({
 export type TrialExecutor = (trial: TrialPlan) => Promise<TrialOutcome>
 
 interface ExecutorOptions {
+  artifactRoot?: string
   captureTrace?: boolean
+  configPath?: string
+  environment?: NodeJS.ProcessEnv
+  onObservedRequests?: (requests: ObservedRequest[]) => void
+  playwrightCliPath?: string
   signal?: AbortSignal
 }
 
@@ -53,6 +60,22 @@ export function resolvePlaywrightCliPath(projectRoot: string): string {
 
 function fingerprint(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 16)
+}
+
+async function optionalFaultProxy(
+  faults: readonly Fault[],
+  observer: ExecutorOptions["onObservedRequests"],
+): Promise<FaultProxy | undefined> {
+  if (faults.length === 0 && !observer) return undefined
+  return startFaultProxy(faults)
+}
+
+function captureObservedRequests(
+  proxy: FaultProxy | undefined,
+  observer: ExecutorOptions["onObservedRequests"],
+): void {
+  if (!proxy || !observer) return
+  observer(proxy.observedRequests())
 }
 
 export function trialOutputDirectory(
@@ -221,7 +244,8 @@ export function createPlaywrightExecutor(
   selector: string,
   options: ExecutorOptions = {},
 ): TrialExecutor {
-  const playwrightCliPath = resolvePlaywrightCliPath(projectRoot)
+  const playwrightCliPath = options.playwrightCliPath ?? resolvePlaywrightCliPath(projectRoot)
+  const artifactRoot = options.artifactRoot ?? projectRoot
   const runId = randomUUID()
   return async (trial) => {
     const startedAt = Date.now()
@@ -234,7 +258,7 @@ export function createPlaywrightExecutor(
         failureSignature: fingerprint("diagnostic aborted"),
       }
     }
-    const outputDirectory = trialOutputDirectory(projectRoot, runId, trial)
+    const outputDirectory = trialOutputDirectory(artifactRoot, runId, trial)
     await mkdir(outputDirectory, { recursive: true })
     // Playwright empties its output directory when a run starts, so reporter
     // coordination must live beside that directory rather than inside it.
@@ -247,12 +271,13 @@ export function createPlaywrightExecutor(
       trialReporterPath,
       browserFaults,
       options.captureTrace === true,
+      options.configPath,
     )
     let proxy: Awaited<ReturnType<typeof startFaultProxy>> | undefined
     try {
-      proxy = browserFaults.length > 0 ? await startFaultProxy(browserFaults) : undefined
+      proxy = await optionalFaultProxy(browserFaults, options.onObservedRequests)
       const environment = {
-        ...createTrialEnvironment(trial),
+        ...createTrialEnvironment(trial, { ...process.env, ...options.environment }),
         ...executionControls.environment,
         FLAKELAB_TRIAL_REPORT_PATH: reportPath,
         ...(proxy ? { FLAKELAB_PROXY_URL: proxy.url } : {}),
@@ -286,10 +311,14 @@ export function createPlaywrightExecutor(
         durationMs,
         options.signal?.aborted === true,
         proxy?.unmatchedFaults() ?? [],
-        projectRoot,
+        artifactRoot,
       )
     } finally {
-      await cleanupTrialResources(bridge, reportPath, proxy)
+      try {
+        captureObservedRequests(proxy, options.onObservedRequests)
+      } finally {
+        await cleanupTrialResources(bridge, reportPath, proxy)
+      }
     }
   }
 }

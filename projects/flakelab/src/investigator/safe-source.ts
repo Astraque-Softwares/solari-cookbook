@@ -1,6 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises"
 import type { Dirent } from "node:fs"
-import { dirname, extname, relative, resolve } from "node:path"
+import { basename, dirname, extname, relative, resolve } from "node:path"
+
+import { projectFiles } from "../repair/project.js"
 
 const MAX_SOURCE_BYTES = 64 * 1_024
 const MAX_APPROVED_SOURCE_BYTES = 256 * 1_024
@@ -9,6 +11,7 @@ const MAX_REPAIR_CONTEXT_BYTES = 12 * 1_024
 const MAX_CONTEXT_FILES = 8
 const MAX_APPROVED_SOURCE_FILES = MAX_CONTEXT_FILES - 1
 const MAX_DISCOVERY_TEST_FILES = 20
+const MAX_RANKED_SOURCE_FILES = 7
 const ALLOWED_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".ts", ".tsx"])
 const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*["'][^"']{8,}/iu
 const LOCAL_IMPORT = /\bfrom\s+["'](\.[^"']+)["']/gu
@@ -33,7 +36,7 @@ function resolveSafeSource(projectRoot: string, selector: string): string {
 }
 
 function resolveSafeProjectPath(projectRoot: string, selector: string): string {
-  const selectedPath = resolve(projectRoot, selector)
+  const selectedPath = resolve(projectRoot, selector.replace(PLAYWRIGHT_LOCATION, "$1"))
   const pathFromRoot = relative(projectRoot, selectedPath)
   if (pathFromRoot.startsWith("..") || pathFromRoot.includes("node_modules")) {
     throw new Error("Test selection must stay inside the project and outside dependencies")
@@ -282,6 +285,19 @@ export async function discoverRepairSourceCandidates(
   projectRoot: string,
   selector: string,
 ): Promise<string[]> {
+  return (await discoverRankedRepairSourceCandidates(projectRoot, selector))
+    .map((candidate) => candidate.path)
+}
+
+export interface RepairSourceCandidate {
+  path: string
+  reason: string
+}
+
+export async function discoverRankedRepairSourceCandidates(
+  projectRoot: string,
+  selector: string,
+): Promise<RepairSourceCandidate[]> {
   const tests = await selectedTestFiles(projectRoot, selector)
   const selectedTests = new Set(tests.map((path) => relative(projectRoot, path)))
   const candidates = new Set<string>()
@@ -293,5 +309,93 @@ export async function discoverRepairSourceCandidates(
       }
     }
   }
-  return [...candidates].sort((left, right) => left.localeCompare(right))
+  const direct = [...candidates].sort((left, right) => left.localeCompare(right))
+  if (direct.length > 0 && direct.some((path) => !isTestSupportPath(path))) {
+    return direct.slice(0, MAX_RANKED_SOURCE_FILES).map((path) => ({
+      path,
+      reason: "Imported by the selected test or its local support graph.",
+    }))
+  }
+  const ranked = await rankedApplicationSources(projectRoot, tests, selectedTests)
+  const combined = [...new Set([...ranked, ...direct])].slice(0, MAX_RANKED_SOURCE_FILES)
+  return combined.map((path) => ({
+    path,
+    reason: direct.includes(path)
+      ? "Imported by the selected test or its local support graph."
+      : "Matched route, component, or identifier clues from the selected test.",
+  }))
+}
+
+function isTestSupportPath(path: string): boolean {
+  const normalized = `/${path.replaceAll("\\", "/").toLowerCase()}/`
+  return normalized.includes("/e2e/")
+    || normalized.includes("/tests/")
+    || normalized.includes("/fixtures/")
+    || normalized.includes("/page-model")
+}
+
+const CLUE_STOP_WORDS = new Set([
+  "async", "await", "const", "expect", "first", "locator", "page", "playwright",
+  "should", "test", "timeout", "visible",
+])
+
+function sourceClues(content: string): string[] {
+  const separated = content.replace(/([a-z])([A-Z])/gu, "$1 $2").toLowerCase()
+  const clues = new Set<string>()
+  for (const word of separated.match(/[a-z][a-z0-9-]{4,}/gu) ?? []) {
+    if (CLUE_STOP_WORDS.has(word)) continue
+    clues.add(word)
+    if (word.endsWith("s") && word.length > 5) clues.add(word.slice(0, -1))
+  }
+  return [...clues]
+}
+
+function sourceScore(path: string, content: string, clues: string[]): number {
+  const normalizedPath = path.toLowerCase()
+  const name = basename(normalizedPath, extname(normalizedPath))
+  const normalizedContent = content.toLowerCase()
+  return clues.reduce((score, clue) => {
+    if (name.includes(clue)) return score + 12
+    if (normalizedPath.includes(clue)) return score + 6
+    return normalizedContent.includes(clue) ? score + 1 : score
+  }, 0)
+}
+
+async function selectedClues(tests: string[]): Promise<string[]> {
+  const contents = await Promise.all(tests.map(async (path) => readFile(path, "utf8")))
+  return sourceClues(contents.join("\n"))
+}
+
+function eligibleApplicationSource(path: string, selectedTests: Set<string>): boolean {
+  const normalized = path.replaceAll("\\", "/")
+  if (selectedTests.has(normalized) || TEST_FILE.test(normalized)) return false
+  if (!ALLOWED_EXTENSIONS.has(extname(normalized).toLowerCase())) return false
+  return !/(?:^|\/)(?:dist|build|coverage|generated|node_modules|\.flakelab)(?:\/|$)/u.test(normalized)
+}
+
+async function rankedApplicationSources(
+  projectRoot: string,
+  tests: string[],
+  selectedTests: Set<string>,
+): Promise<string[]> {
+  const clues = await selectedClues(tests)
+  const scored: Array<{ path: string; score: number }> = []
+  for (const path of await projectFiles(projectRoot)) {
+    const normalized = path.replaceAll("\\", "/")
+    if (!eligibleApplicationSource(normalized, selectedTests)) continue
+    try {
+      const details = await stat(resolve(projectRoot, path))
+      if (!details.isFile() || details.size > MAX_APPROVED_SOURCE_BYTES) continue
+      const content = await readFile(resolve(projectRoot, path), "utf8")
+      const score = sourceScore(normalized, content, clues)
+      if (score > 0) scored.push({ path: normalized, score })
+    } catch {
+      // The inventory may change while suggestions are ranked; missing files are ignored.
+    }
+  }
+  const ranked = [...scored]
+  ranked.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
+  return ranked
+    .slice(0, MAX_RANKED_SOURCE_FILES)
+    .map((entry) => entry.path)
 }

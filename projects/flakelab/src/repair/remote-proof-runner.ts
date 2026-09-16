@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util"
+import { resolve } from "node:path"
 
 import { evaluateExperiment } from "../discovery/evaluate.js"
 import { faultSetSchema } from "../domain/schema.js"
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
       concurrency: { type: "string" },
+      config: { type: "string" },
       "faults-json": { type: "string" },
       hostile: { type: "boolean", default: false },
       "min-rate": { type: "string" },
@@ -35,7 +37,9 @@ async function main(): Promise<void> {
     ? faultSetSchema.parse(JSON.parse(required(values["faults-json"], "faults-json")))
     : []
   const result = await evaluateExperiment(
-    createPlaywrightExecutor(process.cwd(), required(values.selector, "selector")),
+    createPlaywrightExecutor(process.cwd(), required(values.selector, "selector"), {
+      ...(values.config ? { configPath: resolve(process.cwd(), values.config) } : {}),
+    }),
     {
       concurrency: integer(values.concurrency, "concurrency"),
       faults,

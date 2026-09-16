@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test"
 
 import { access, mkdir, readFile, symlink, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 
+import { prepareRepairArtifactDirectories } from "../../src/commands/repair.js"
 import { nearbyRegressionSelectors } from "../../src/repair/validator.js"
 import { remoteFaultArguments } from "../../src/repair/solari-validator.js"
 import {
@@ -76,6 +77,16 @@ test("candidate diff preview does not change the working tree", async () => {
   expect(await readFile(originalPath, "utf8")).toBe(original)
 })
 
+test("custom nested repair artifact paths are created before provider output", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const patch = testInfo.outputPath("nested/evidence/candidate.diff")
+  const proof = testInfo.outputPath("nested/evidence/proof.json")
+  await prepareRepairArtifactDirectories(patch, proof)
+  await expect(access(dirname(patch))).resolves.toBeUndefined()
+  await expect(access(dirname(proof))).resolves.toBeUndefined()
+})
+
 test("proof transports every supported fault without narrowing it to network delay", () => {
   const faults = [{
     copies: 3,
@@ -118,6 +129,35 @@ test("nearby regression selection covers nested and co-located test variants", a
     "src/checkout/checkout.spec.js",
     "tests/e2e/nested/cart.test.tsx",
   ])
+})
+
+test("nearby regression selection keeps sibling workspace packages outside Playwright scope", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const workspaceRoot = testInfo.outputPath("monorepo-regression-selection")
+  const projectRoot = resolve(workspaceRoot, "apps/shop-e2e")
+  await mkdir(resolve(projectRoot, "src"), { recursive: true })
+  await mkdir(resolve(workspaceRoot, "packages/shop/data/src"), { recursive: true })
+  await writeFile(resolve(projectRoot, "src/products.spec.ts"), "", "utf8")
+  await writeFile(resolve(projectRoot, "src/cart.spec.ts"), "", "utf8")
+  await writeFile(resolve(workspaceRoot, "packages/shop/data/src/use-products.spec.ts"), "", "utf8")
+
+  const selectors = await nearbyRegressionSelectors(
+    projectRoot,
+    "src/products.spec.ts",
+    {
+      summary: "Handle incomplete product responses",
+      rationale: "The application should preserve a safe product state",
+      edits: [{
+        path: "packages/shop/data/src/use-products.ts",
+        before: "before",
+        after: "after",
+      }],
+    },
+    workspaceRoot,
+  )
+
+  expect(selectors).toEqual(["src/cart.spec.ts"])
 })
 
 test("nearby regression selection caps large suites instead of rejecting them", async ({

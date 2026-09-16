@@ -8,6 +8,24 @@ export interface ProjectCommand {
   directory: string
 }
 
+function nxCommand(
+  manager: Awaited<ReturnType<typeof packageManager>>,
+  project: string,
+  target: string,
+): ProjectCommand {
+  const commandArguments: Record<typeof manager, string[]> = {
+    bun: ["x", "--no-install", "nx"],
+    npm: ["exec", "--", "nx"],
+    pnpm: ["exec", "nx"],
+    yarn: ["exec", "nx"],
+  }
+  return {
+    command: manager,
+    args: [...commandArguments[manager], "run", `${project}:${target}`],
+    directory: "",
+  }
+}
+
 export async function projectPlan(root: string, directory: string) {
   const manager = await packageManager(root)
   const manifest = await projectManifest(root)
@@ -20,19 +38,23 @@ export async function projectPlan(root: string, directory: string) {
   const install: ProjectCommand = { command: manager, args: frozen, directory: "" }
   const proof = target.flakelab?.proof ?? { environment: {}, setup: [], node: "22" }
   const setup = proof.setup
+  const nx = await exists(resolve(root, "nx.json"))
   for (const script of setup) {
     if (!target.scripts[script]) throw new Error(`Missing proof setup script: ${script}`)
   }
   const check = (name: string): ProjectCommand | undefined => {
     if (target.scripts[name]) return { command: manager, args: ["run", name], directory }
-    if (directory) return undefined
+    if (target.name && nx) return nxCommand(manager, target.name, name)
     if (manifest.scripts[name]) return { command: manager, args: ["run", name], directory: "" }
     return undefined
   }
   return {
     manager,
     node: proof.node,
-    environment: Object.entries(proof.environment).map(([key, value]) => `${key}=${value}`),
+    environment: [
+      ...(nx ? ["NX_DAEMON=false"] : []),
+      ...Object.entries(proof.environment).map(([key, value]) => `${key}=${value}`),
+    ],
     version: version?.split("+")[0],
     install,
     setup: setup.map((script): ProjectCommand => ({ command: manager, args: ["run", script], directory })),

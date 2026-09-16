@@ -49,8 +49,8 @@ test("adaptive recommendations keep the cheapest useful next step explicit", () 
   })
   expect(local).toMatchObject({
     credentials: [],
-    expectedDuration: "up to 10 minute(s)",
-    plannedTrials: 96,
+    expectedDuration: "up to 2 minute(s)",
+    plannedTrials: 7,
     solariCostEstimateUsd: 0,
   })
   expect(local.command).toContain("--discover")
@@ -66,7 +66,7 @@ test("adaptive recommendations keep the cheapest useful next step explicit", () 
   expect(mixed).toMatchObject({
     command: "flakelab diagnose \"tests/checkout.spec.ts\" --discover",
     credentials: [],
-    plannedTrials: 96,
+    plannedTrials: 7,
   })
   expect(mixed.rationale).toContain("amplifies the same signature")
 
@@ -97,11 +97,28 @@ test("adaptive recommendations keep the cheapest useful next step explicit", () 
     solariCostEstimateUsd: null,
   })
   expect(repair.solariCostNote).toContain("No reliable Solari cost estimate")
+
+  const noTrigger = buildDiagnosisRecommendation({
+    elapsedMilliseconds: 60_000,
+    observedRuns: 16,
+    stage: "no-signal-observed",
+    status: "no-failure-observed",
+    target: "tests/checkout.spec.ts",
+    values: options(),
+  })
+  expect(noTrigger).toMatchObject({
+    command: null,
+    credentials: [],
+    plannedTrials: 0,
+    solariCostEstimateUsd: 0,
+  })
+  expect(noTrigger.rationale).toContain("no causal reproducer")
 })
 
 test("a default diagnosis runs a local scan without requesting provider work", async ({
   browserName: _browserName,
 }, testInfo) => {
+  testInfo.setTimeout(60_000)
   const artifactDirectory = testInfo.outputPath("adaptive diagnosis")
   await diagnose("tests/fixtures/checkout-regression.spec.ts", options({
     artifacts: artifactDirectory,
@@ -115,6 +132,7 @@ test("a default diagnosis runs a local scan without requesting provider work", a
   expect(artifact).toMatchObject({
     artifacts: {
       analysis: null,
+      discovery: null,
       evidence: null,
       html: null,
       patch: null,

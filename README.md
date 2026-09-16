@@ -8,6 +8,9 @@ a test or summarizing a trace. It forms competing hypotheses, changes one condit
 measures the resulting failure probability, minimizes the trigger, proposes a bounded patch, and
 proves that patch in disposable Solari microVMs.
 
+Source and issue tracking default to
+[kelvinguchu/solari-cookbook](https://github.com/kelvinguchu/solari-cookbook/tree/main/projects/flakelab).
+
 ![Animated FlakeLab walkthrough](docs/assets/flakelab-walkthrough.svg)
 
 ## The two-minute version
@@ -59,6 +62,12 @@ selects changed or affected browser tests, runs a bounded diagnosis, uploads the
 bundle, and writes a Markdown job summary. The example workflow runs local quality checks for every
 pull request and allows secret-backed diagnosis only for same-repository or manually dispatched
 runs protected by the `flakelab` GitHub environment.
+
+The full AI investigation and isolated proof journey requires both `GROQ_API_KEY` and
+`SOLARI_API_KEY`; local scanning and discovery require neither. Keys may be supplied through
+hidden run-once prompts, the current terminal environment, an ignored project `.env`, or protected
+CI secrets. See the [provider credential guide](docs/content/docs/credentials.mdx) for exact
+PowerShell, Bash/zsh, `.env`, CI, cleanup, and rotation instructions.
 
 ## Explore
 

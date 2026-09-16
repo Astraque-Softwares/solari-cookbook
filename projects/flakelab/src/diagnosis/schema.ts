@@ -1,9 +1,11 @@
 import { z } from "zod"
 
 import { scanStatusSchema } from "../scan/schema.js"
+import { portableRepositoryProfileSchema } from "../project/schema.js"
 
 export const diagnosisStageSchema = z.enum([
   "observed",
+  "no-signal-observed",
   "reproducer-created",
   "investigated",
   "repair-rejected",
@@ -25,6 +27,7 @@ export const diagnosisOptionsSchema = z.object({
   artifacts: z.string().min(1),
   baseline: z.string().min(1).nullable(),
   concurrency: z.string().min(1),
+  config: z.string().min(1).optional(),
   discover: z.boolean(),
   evidence: z.string().min(1),
   html: z.string().min(1),
@@ -84,6 +87,7 @@ export const diagnosisInputSchema = z.object({
 export const diagnosisArtifactSchema = z.object({
   artifacts: z.object({
     analysis: z.string().min(1).nullable(),
+    discovery: z.string().min(1).nullable().default(null),
     evidence: z.string().min(1).nullable(),
     html: z.string().min(1).nullable(),
     patch: z.string().min(1).nullable(),
@@ -108,6 +112,7 @@ export const diagnosisArtifactSchema = z.object({
     tests: z.number().int().nonnegative(),
   }),
   recommendation: diagnosisRecommendationSchema,
+  repository: portableRepositoryProfileSchema.optional(),
   stage: diagnosisStageSchema,
   status: z.enum(["complete", "failed", "interrupted", "running"]),
   updatedAt: z.iso.datetime(),

@@ -59,7 +59,7 @@ interface CompletedTrial {
   plan: TrialPlan
 }
 
-interface CausalEvaluator {
+export interface CausalEvaluator {
   baseline: () => ExperimentResult
   evaluate: (faults: Fault[], trials?: number) => Promise<ExperimentResult>
 }

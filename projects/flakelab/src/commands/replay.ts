@@ -3,6 +3,8 @@ import { resolve } from "node:path"
 import { evaluateExperiment } from "../discovery/evaluate.js"
 import { readReproducer } from "../reproducer/file.js"
 import { createPlaywrightExecutor } from "../runner/playwright-executor.js"
+import { discoverRepositoryProfile, repositoryEnvironment } from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
 import { writeStderr } from "../ui/console.js"
 import { TerminalDocument } from "../ui/document.js"
 import { formatCount } from "../ui/format.js"
@@ -34,16 +36,31 @@ function replaySummary(verdict: ReplayVerdict): string {
   ]).render()
 }
 
-export async function replay(filePath: string, values: ReplayOptions): Promise<void> {
+export async function replay(
+  filePath: string,
+  values: ReplayOptions,
+  repository?: RepositoryProfile,
+): Promise<void> {
   const projectRoot = process.cwd()
   const reproducer = await readReproducer(resolve(projectRoot, filePath))
+  const profile = repository ?? await discoverRepositoryProfile({
+    artifactDirectory: ".flakelab/runs",
+    invocationRoot: projectRoot,
+    target: reproducer.test,
+  })
   const progress = new ProgressReporter()
   progress.start(
     "reproducer replay",
     `${formatCount(reproducer.trials, "trial")} under the recorded fault`,
   )
   const result = await withInterruption(async (signal) => evaluateExperiment(
-    createPlaywrightExecutor(projectRoot, reproducer.test, { signal }),
+    createPlaywrightExecutor(profile.executionRoot, profile.playwright.target, {
+      artifactRoot: profile.artifactRoot,
+      configPath: profile.playwright.configPath,
+      environment: repositoryEnvironment(profile),
+      playwrightCliPath: profile.playwright.cliPath,
+      signal,
+    }),
     {
       concurrency: integerOption(values.concurrency, "concurrency"),
       faults: reproducer.faults,

@@ -17,7 +17,7 @@ export function buildDiscoveryBudget(input: DiscoveryBudgetInput): DiscoveryBudg
     input.elapsedMilliseconds * input.plannedTrials
       / input.observedRuns / input.concurrency / 1_000 / 60,
   ) * 60
-  const recommendedSeconds = Math.max(600, Math.ceil(estimatedSeconds * 2 / 60) * 60)
+  const recommendedSeconds = Math.max(60, Math.ceil(estimatedSeconds * 2 / 60) * 60)
   return {
     configuredSeconds: input.configuredSeconds,
     estimatedSeconds,

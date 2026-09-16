@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test"
 
 import {
+  requestProofDiscoverySeconds,
+  requestProofSources,
+  requestProviderProofApproval,
   requestSolariProof,
 } from "../../src/diagnosis/solari-handoff.js"
 import { buildDiscoveryBudget } from "../../src/diagnosis/discovery-budget.js"
@@ -19,7 +22,7 @@ test("discovery budget uses measured runtime and adds rounded headroom", () => {
   })).toEqual(budget)
 })
 
-test("discovery budget recommends at least ten minutes", () => {
+test("discovery budget retains measured headroom without a large fixed minimum", () => {
   expect(buildDiscoveryBudget({
     concurrency: 1,
     configuredSeconds: 90,
@@ -29,7 +32,7 @@ test("discovery budget recommends at least ten minutes", () => {
   })).toEqual({
     configuredSeconds: 90,
     estimatedSeconds: 240,
-    recommendedSeconds: 600,
+    recommendedSeconds: 480,
   })
 })
 
@@ -60,6 +63,44 @@ test("Solari proof handoff defaults to no", async () => {
     budget,
     { ...interactive, ask: () => Promise.resolve("") },
   )).resolves.toBeNull()
+})
+
+test("provider consent can precede local discovery without requesting sources", async () => {
+  const questions: string[] = []
+  const answers = ["y", "y"]
+  await expect(requestProviderProofApproval({
+    ask: (question) => {
+      questions.push(question)
+      return Promise.resolve(answers.shift() ?? "")
+    },
+    inputIsTTY: true,
+    outputIsTTY: true,
+  })).resolves.toBe(true)
+
+  expect(questions).toHaveLength(2)
+  expect(questions.join(" ")).not.toContain("source")
+})
+
+test("source approval and discovery budget can be requested after local discovery", async () => {
+  await expect(requestProofSources([], {
+    ask: () => Promise.resolve("1"),
+    discoverSources: () => Promise.resolve([{
+      path: "src/account.ts",
+      reason: "imported by the selected test",
+    }]),
+    inputIsTTY: true,
+    outputIsTTY: true,
+  })).resolves.toEqual(["src/account.ts"])
+
+  await expect(requestProofDiscoverySeconds({
+    configuredSeconds: 600,
+    estimatedSeconds: 720,
+    recommendedSeconds: 720,
+  }, {
+    ask: () => Promise.resolve("n"),
+    inputIsTTY: true,
+    outputIsTTY: true,
+  })).resolves.toBe(600)
 })
 
 test("AI candidate generation requires separate consent", async () => {
@@ -116,7 +157,10 @@ test("Solari proof handoff offers one discovered application source for approval
       questions.push(question)
       return Promise.resolve(answers.shift() ?? "")
     },
-    discoverSources: () => Promise.resolve(["src/checkout.ts"]),
+    discoverSources: () => Promise.resolve([{
+      path: "src/checkout.ts",
+      reason: "Imported by the selected test.",
+    }]),
   })).resolves.toEqual({ maxSeconds: 960, sources: ["src/checkout.ts"] })
   expect(questions).toContain("Approve suggested application source src/checkout.ts? [y/N] ")
 })
@@ -133,7 +177,10 @@ test("Solari proof handoff accepts a numbered source suggestion", async () => {
       }
       return Promise.resolve(answers.shift() ?? "")
     },
-    discoverSources: () => Promise.resolve(["src/cart.ts", "src/checkout.ts"]),
+    discoverSources: () => Promise.resolve([
+      { path: "src/cart.ts", reason: "Matched cart clues." },
+      { path: "src/checkout.ts", reason: "Matched checkout clues." },
+    ]),
   })).resolves.toEqual({ maxSeconds: 90, sources: ["src/checkout.ts"] })
   expect(completions).toEqual(["src/cart.ts", "src/checkout.ts"])
 })

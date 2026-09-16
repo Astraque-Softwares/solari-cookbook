@@ -4,6 +4,8 @@ import type { AnalysisArtifact } from "../analysis/schema.js"
 import { portableProjectPath } from "../artifacts/paths.js"
 import type { DiagnoseOptions } from "../commands/options.js"
 import type { ScanArtifact, ScanStatus } from "../scan/schema.js"
+import { portableRepositoryProfile } from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
 import {
   diagnosisInputHash,
   writeDiagnosisCheckpoint,
@@ -25,6 +27,7 @@ export interface Observation {
 
 export interface DiagnosisPaths {
   analysis: string | null
+  discovery: string | null
   evidence: string | null
   html: string | null
   patch: string | null
@@ -37,6 +40,7 @@ export interface DiagnosisContext {
   artifactPath: string
   checkpoint: DiagnosisArtifact
   projectRoot: string
+  repository?: RepositoryProfile
   target?: string
   values: DiagnoseOptions
 }
@@ -67,6 +71,7 @@ export function analysisObservation(
 export function emptyPaths(): DiagnosisPaths {
   return {
     analysis: null,
+    discovery: null,
     evidence: null,
     html: null,
     patch: null,
@@ -133,6 +138,7 @@ export function createDiagnosisContext(options: {
   observation: Observation
   paths: DiagnosisPaths
   projectRoot: string
+  repository?: RepositoryProfile
   target?: string
   values: DiagnoseOptions
 }): DiagnosisContext {
@@ -146,7 +152,9 @@ export function createDiagnosisContext(options: {
   }
   const recommendation = buildDiagnosisRecommendation({
     elapsedMilliseconds: options.observation.elapsedMilliseconds,
+    observedExecutions: options.observation.executions,
     observedRuns: options.paths.scan ? Number(options.values.runs) : 0,
+    selectedTestCount: options.observation.tests,
     stage: "observed",
     status: options.observation.status,
     target: options.target,
@@ -166,6 +174,7 @@ export function createDiagnosisContext(options: {
     lastError: null,
     observation: options.observation,
     recommendation,
+    ...(options.repository ? { repository: portableRepositoryProfile(options.repository) } : {}),
     stage: "observed",
     status: "running",
     updatedAt: createdAt,
@@ -191,6 +200,7 @@ export function createDiagnosisContext(options: {
     artifactPath: options.artifactPath,
     checkpoint,
     projectRoot: options.projectRoot,
+    ...(options.repository ? { repository: options.repository } : {}),
     ...(options.target ? { target: options.target } : {}),
     values: options.values,
   }
@@ -200,12 +210,14 @@ export function restoreDiagnosisContext(
   artifactPath: string,
   checkpoint: DiagnosisArtifact,
   projectRoot: string,
+  repository?: RepositoryProfile,
 ): DiagnosisContext {
   const target = checkpoint.input.target ?? undefined
   return {
     artifactPath,
     checkpoint,
     projectRoot,
+    ...(repository ? { repository } : {}),
     ...(target ? { target } : {}),
     values: restoreDiagnosisOptions(checkpoint),
   }
@@ -243,7 +255,9 @@ export async function saveDiagnosis(
   const { checkpoint, target, values } = context
   const recommendation = buildDiagnosisRecommendation({
     elapsedMilliseconds: checkpoint.observation.elapsedMilliseconds,
+    observedExecutions: checkpoint.observation.executions,
     observedRuns: checkpoint.artifacts.scan ? Number(values.runs) : 0,
+    selectedTestCount: checkpoint.observation.tests,
     stage,
     status: checkpoint.observation.status,
     target,

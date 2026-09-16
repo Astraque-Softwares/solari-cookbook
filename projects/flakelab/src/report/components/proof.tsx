@@ -97,6 +97,14 @@ export function ProofSection({ report }: Readonly<{
       <CheckTag label="typecheck" passed={proof.staticChecks.typecheck} />
       <CheckTag label="eslint" passed={proof.staticChecks.lint} />
     </div>
+    {proof.resources && <p className="table-note">
+      Solari resources: {proof.resources.created} created · {proof.resources.released} released
+      {` · ${proof.resources.live} live`}
+    </p>}
+    {report.repository && <p className="table-note">
+      Repository fingerprint: <span className="mono">{report.repository.fingerprint}</span>
+      {` · drift ${report.repository.drift}`}
+    </p>}
     <MatrixTable matrix={proof.matrix} />
   </Section>
 }

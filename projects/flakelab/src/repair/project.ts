@@ -12,9 +12,13 @@ export function excludedProjectPath(path: string): boolean {
     || part.endsWith(".pem") || part.endsWith(".key"))
 }
 const manifestSchema = z.object({
+  name: z.string().optional(),
   packageManager: z.string().optional(),
   workspaces: z.union([z.array(z.string()), z.object({ packages: z.array(z.string()) })]).optional(),
   scripts: z.record(z.string(), z.string()).default({}),
+  nx: z.object({
+    targets: z.record(z.string(), z.looseObject({})).optional(),
+  }).loose().optional(),
   flakelab: z.object({
     proof: z.object({
       setup: z.array(z.string().regex(/^[\w:.-]+$/u)).default([]),
@@ -41,18 +45,18 @@ export async function projectManifest(root: string) {
 
 export async function workspaceRoot(project: string): Promise<string> {
   let root = resolve(project)
-  let selected = root
-  while (dirname(root) !== root) {
-    if (await exists(resolve(root, ".git"))) break
-    root = dirname(root)
-    if (await exists(resolve(root, "pnpm-workspace.yaml"))) selected = root
+  while (true) {
+    if (await exists(resolve(root, "pnpm-workspace.yaml"))
+      || await exists(resolve(root, "pnpm-workspace.yml"))
+      || await exists(resolve(root, "nx.json"))
+      || await exists(resolve(root, "turbo.json"))) return root
     if (await exists(resolve(root, "package.json"))) {
       const manifest = await projectManifest(root)
-      if (manifest.workspaces) selected = root
+      if (manifest.workspaces) return root
     }
-    if (await exists(resolve(root, ".git"))) break
+    if (await exists(resolve(root, ".git")) || dirname(root) === root) return resolve(project)
+    root = dirname(root)
   }
-  return selected
 }
 
 export async function projectFiles(root: string): Promise<string[]> {

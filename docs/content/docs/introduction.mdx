@@ -101,8 +101,11 @@ tests and need to answer questions such as:
 - A Playwright project using `@playwright/test` 1.62.1.
 - A locally installed Chromium browser for local execution.
 - pnpm in projects whose setup depends on pnpm.
-- `GROQ_API_KEY` only for AI investigation or repair.
-- `SOLARI_API_KEY` only for isolated repair proof, publication, or statistical bisect.
+- `GROQ_API_KEY` for AI investigation and candidate generation in the provider-backed journey.
+- `SOLARI_API_KEY` for isolated repair proof, publication, or statistical bisect.
+
+Local-only commands need neither key. A complete candidate-generation and proof run needs both;
+see [Provider credentials](/docs/credentials) for secure setup options.
 
 ## Installation
 

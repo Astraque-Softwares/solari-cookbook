@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util"
+import { join } from "node:path"
 
 import type { DiagnoseOptions } from "../commands/options.js"
 
@@ -12,6 +13,18 @@ function withDefault<T>(value: T | undefined, fallback: T): T {
   return value === undefined ? fallback : value
 }
 
+function configOption(value: string | undefined): Pick<DiagnoseOptions, "config"> {
+  return value ? { config: value } : {}
+}
+
+function artifactDefault(
+  value: string | undefined,
+  artifacts: string,
+  filename: string,
+): string {
+  return value ?? join(artifacts, filename)
+}
+
 export function parseDiagnoseArguments(args: string[]): DiagnoseInvocation {
   const parsed = parseArgs({
     args,
@@ -21,9 +34,10 @@ export function parseDiagnoseArguments(args: string[]): DiagnoseInvocation {
       artifacts: { type: "string", default: ".flakelab/runs" },
       baseline: { type: "string" },
       concurrency: { type: "string", default: "2" },
+      config: { type: "string" },
       discover: { type: "boolean", default: false },
-      evidence: { type: "string", default: "flakelab.investigation.json" },
-      html: { type: "string", default: "flakelab.report.html" },
+      evidence: { type: "string" },
+      html: { type: "string" },
       investigate: { type: "boolean", default: false },
       "max-cost": { type: "string", default: "0.25" },
       "max-delay": { type: "string", default: "250" },
@@ -34,13 +48,13 @@ export function parseDiagnoseArguments(args: string[]): DiagnoseInvocation {
       "min-rate": { type: "string", default: "0.7" },
       model: { type: "string", default: "qwen/qwen3.8-27b" },
       open: { type: "boolean", default: false },
-      patch: { type: "string", default: "candidate.diff" },
-      pattern: { type: "string", default: "**/api/checkout" },
-      proof: { type: "string", default: "flakelab.proof.json" },
+      patch: { type: "string" },
+      pattern: { type: "string", default: "auto" },
+      proof: { type: "string" },
       "prompt-credentials": { type: "boolean", default: false },
       repair: { type: "boolean", default: false },
       report: { type: "string" },
-      reproducer: { type: "string", default: "flakelab.repro.yaml" },
+      reproducer: { type: "string" },
       runs: { type: "string", default: "4" },
       seed: { type: "string", default: "1" },
       source: { type: "string", multiple: true, default: [] },
@@ -57,16 +71,18 @@ export function parseDiagnoseArguments(args: string[]): DiagnoseInvocation {
   if (!target && (parsed.values.discover || parsed.values.investigate || parsed.values.repair)) {
     throw new Error("diagnose needs an explicit test target before running new experiments")
   }
+  const artifacts = withDefault(parsed.values.artifacts, ".flakelab/runs")
   return {
     command: "diagnose",
     ...(target ? { target } : {}),
     options: {
-      artifacts: withDefault(parsed.values.artifacts, ".flakelab/runs"),
+      artifacts,
       baseline: parsed.values.baseline,
       concurrency: withDefault(parsed.values.concurrency, "2"),
+      ...configOption(parsed.values.config),
       discover: withDefault(parsed.values.discover, false),
-      evidence: withDefault(parsed.values.evidence, "flakelab.investigation.json"),
-      html: withDefault(parsed.values.html, "flakelab.report.html"),
+      evidence: artifactDefault(parsed.values.evidence, artifacts, "investigation.json"),
+      html: artifactDefault(parsed.values.html, artifacts, "report.html"),
       investigate: withDefault(parsed.values.investigate, false),
       "max-cost": withDefault(parsed.values["max-cost"], "0.25"),
       "max-delay": withDefault(parsed.values["max-delay"], "250"),
@@ -77,13 +93,13 @@ export function parseDiagnoseArguments(args: string[]): DiagnoseInvocation {
       "min-rate": withDefault(parsed.values["min-rate"], "0.7"),
       model: withDefault(parsed.values.model, "qwen/qwen3.8-27b"),
       open: withDefault(parsed.values.open, false),
-      patch: withDefault(parsed.values.patch, "candidate.diff"),
-      pattern: withDefault(parsed.values.pattern, "**/api/checkout"),
-      proof: withDefault(parsed.values.proof, "flakelab.proof.json"),
+      patch: artifactDefault(parsed.values.patch, artifacts, "candidate.diff"),
+      pattern: withDefault(parsed.values.pattern, "auto"),
+      proof: artifactDefault(parsed.values.proof, artifacts, "proof.json"),
       "prompt-credentials": withDefault(parsed.values["prompt-credentials"], false),
       repair: withDefault(parsed.values.repair, false),
       report: parsed.values.report,
-      reproducer: withDefault(parsed.values.reproducer, "flakelab.repro.yaml"),
+      reproducer: artifactDefault(parsed.values.reproducer, artifacts, "reproducer.yaml"),
       runs: withDefault(parsed.values.runs, "4"),
       seed: withDefault(parsed.values.seed, "1"),
       source: parsed.values.source ?? [],

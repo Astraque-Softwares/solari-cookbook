@@ -35,6 +35,10 @@ const representativeRunSchema = z.object({
 
 export const evidenceReportSchema = z.object({
   generatedAt: z.iso.datetime(),
+  repository: z.object({
+    drift: z.literal("unchanged"),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  }).optional(),
   status: z.enum(["FIX_PROVEN", "PATCH_REJECTED"]),
   test: z.string().min(1).max(500),
   model: z.string().min(1).max(200),
@@ -76,6 +80,12 @@ export const evidenceReportSchema = z.object({
   proof: z.object({
     accepted: z.boolean(),
     execution: z.literal("solari-microvm"),
+    outcome: z.enum(["candidate-rejected", "candidate-proven"]).optional(),
+    resources: z.object({
+      created: z.number().int().nonnegative(),
+      live: z.number().int().nonnegative(),
+      released: z.number().int().nonnegative(),
+    }).optional(),
     staticChecks: z.object({ typecheck: z.boolean().nullable(), lint: z.boolean().nullable() }),
     matrix: z.array(z.object({
       label: z.string().min(1),

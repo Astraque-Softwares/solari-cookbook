@@ -1,15 +1,15 @@
 {
   "name": "flakelab",
-  "version": "0.1.15",
+  "version": "0.1.22",
   "description": "Find, reproduce, and prove fixes for flaky Playwright tests.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Astraque-Softwares/solari-cookbook.git",
+    "url": "git+https://github.com/kelvinguchu/solari-cookbook.git",
     "directory": "projects/flakelab"
   },
-  "homepage": "https://github.com/Astraque-Softwares/solari-cookbook/tree/main/projects/flakelab",
+  "homepage": "https://github.com/kelvinguchu/solari-cookbook/tree/main/projects/flakelab",
   "engines": {
     "node": ">=20"
   },
@@ -49,6 +49,7 @@
     "ai": "^7.0.87",
     "diff": "^9.0.0",
     "dotenv": "^17.2.2",
+    "typescript": "^5.9.2",
     "undici": "^7.29.0",
     "yaml": "^2.9.0",
     "zod": "^4.5.4"
@@ -69,7 +70,6 @@
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
     "typescript-eslint": "^8.69.0",
     "vite": "^8.2.2"
   }

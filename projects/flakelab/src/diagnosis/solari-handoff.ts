@@ -5,9 +5,13 @@ import { sanitizeLine } from "../ui/text.js"
 import type { DiscoveryBudget } from "./discovery-budget.js"
 
 type AskQuestion = (question: string, completions?: string[]) => Promise<string>
-type DiscoverSources = () => Promise<string[]>
+export interface SourceSuggestion {
+  path: string
+  reason: string
+}
+type DiscoverSources = () => Promise<SourceSuggestion[]>
 
-interface SolariHandoffOptions {
+export interface SolariHandoffOptions {
   ask?: AskQuestion
   discoverSources?: DiscoverSources
   environment?: NodeJS.ProcessEnv
@@ -53,21 +57,22 @@ function acceptedByDefault(answer: string): boolean {
   return answer.trim() === "" || accepted(answer)
 }
 
-function candidateQuestion(candidates: string[]): string {
+function candidateQuestion(candidates: SourceSuggestion[]): string {
   const choices = candidates
-    .map((candidate, index) => `  ${index + 1}. ${sanitizeLine(candidate)}`)
+    .map((candidate, index) => `  ${index + 1}. ${sanitizeLine(candidate.path)}`
+      + ` — ${sanitizeLine(candidate.reason)}`)
     .join("\n")
   return `Suggested application sources:\n${choices}\n`
     + "Select a number or type a path (Tab shows matches; Enter cancels): "
 }
 
-function selectedSource(answer: string, candidates: string[]): string | null {
+function selectedSource(answer: string, candidates: SourceSuggestion[]): string | null {
   const value = answer.trim()
   if (!value) {
     return null
   }
   const selectedIndex = /^\d+$/u.test(value) ? Number(value) - 1 : -1
-  return sanitizeLine(candidates[selectedIndex] ?? value)
+  return sanitizeLine(candidates[selectedIndex]?.path ?? value)
 }
 
 async function requestApprovedSources(
@@ -76,7 +81,7 @@ async function requestApprovedSources(
 ): Promise<string[] | null> {
   const candidates = discoverSources ? await discoverSources() : []
   if (candidates.length === 1) {
-    const candidate = sanitizeLine(candidates[0])
+    const candidate = sanitizeLine(candidates[0].path)
     if (accepted(await ask(`Approve suggested application source ${candidate}? [y/N] `))) {
       return [candidate]
     }
@@ -84,8 +89,44 @@ async function requestApprovedSources(
   const question = candidates.length > 0
     ? candidateQuestion(candidates)
     : "Application source to approve (type a path; Enter cancels): "
-  const source = selectedSource(await ask(question, candidates), candidates)
+  const source = selectedSource(
+    await ask(question, candidates.map((candidate) => candidate.path)),
+    candidates,
+  )
   return source ? [source] : null
+}
+
+export async function requestProviderProofApproval(
+  options: SolariHandoffOptions = {},
+): Promise<boolean> {
+  if (!interactive(options)) return false
+  const ask = options.ask ?? askInTerminal
+  if (!accepted(await ask("Use Solari to prove a candidate fix? [y/N] "))) return false
+  return accepted(await ask("Use AI to investigate and generate the candidate? [y/N] "))
+}
+
+export async function requestProofSources(
+  approvedSources: string[],
+  options: SolariHandoffOptions = {},
+): Promise<string[] | null> {
+  if (!interactive(options)) return null
+  if (approvedSources.length > 0) return approvedSources
+  return requestApprovedSources(options.ask ?? askInTerminal, options.discoverSources)
+}
+
+export async function requestProofDiscoverySeconds(
+  budget: DiscoveryBudget,
+  options: SolariHandoffOptions = {},
+): Promise<number | null> {
+  if (!interactive(options)) return null
+  let maxSeconds = budget.configuredSeconds
+  if (budget.recommendedSeconds <= budget.configuredSeconds) return maxSeconds
+  const ask = options.ask ?? askInTerminal
+  const question = `Fault discovery is budgeted up to `
+    + `${formatSeconds(budget.recommendedSeconds)}, above the current `
+    + `${formatSeconds(budget.configuredSeconds)} limit. Raise the limit? [Y/n] `
+  if (acceptedByDefault(await ask(question))) maxSeconds = budget.recommendedSeconds
+  return maxSeconds
 }
 
 export async function requestSolariProof(
@@ -93,32 +134,10 @@ export async function requestSolariProof(
   budget: DiscoveryBudget,
   options: SolariHandoffOptions = {},
 ): Promise<SolariProofRequest | null> {
-  if (!interactive(options)) {
-    return null
-  }
-  const ask = options.ask ?? askInTerminal
-  if (!accepted(await ask("Use Solari to prove a candidate fix? [y/N] "))) {
-    return null
-  }
-  if (!accepted(await ask("Use AI to investigate and generate the candidate? [y/N] "))) {
-    return null
-  }
-  let sources = approvedSources
-  if (sources.length === 0) {
-    const selected = await requestApprovedSources(ask, options.discoverSources)
-    if (!selected) {
-      return null
-    }
-    sources = selected
-  }
-  let maxSeconds = budget.configuredSeconds
-  if (budget.recommendedSeconds > budget.configuredSeconds) {
-    const question = `Fault discovery is budgeted up to `
-      + `${formatSeconds(budget.recommendedSeconds)}, above the current `
-      + `${formatSeconds(budget.configuredSeconds)} limit. Raise the limit? [Y/n] `
-    if (acceptedByDefault(await ask(question))) {
-      maxSeconds = budget.recommendedSeconds
-    }
-  }
+  if (!await requestProviderProofApproval(options)) return null
+  const sources = await requestProofSources(approvedSources, options)
+  if (!sources) return null
+  const maxSeconds = await requestProofDiscoverySeconds(budget, options)
+  if (maxSeconds === null) return null
   return { maxSeconds, sources }
 }

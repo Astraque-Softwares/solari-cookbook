@@ -17,7 +17,7 @@ export const siteUrl = normalize(
     : "https://flakelab.vercel.app"),
 )
 
-export const repoUrl = "https://github.com/Astraque-Softwares/solari-cookbook"
+export const repoUrl = "https://github.com/kelvinguchu/solari-cookbook"
 
 export const repoDocsUrl = `${repoUrl}/blob/main/docs/content/docs`
 

@@ -36,7 +36,10 @@ const FAULT_BOUNDS = "--max-delay, --max-duplicate-bytes, --max-hold-ms, --max-r
   + " --animation-rate"
 
 const EVIDENCE_OPTIONS: DocumentRow[] = [
-  { label: "--reproducer <path>", value: "Minimized reproducer (default: flakelab.repro.yaml)" },
+  {
+    label: "--reproducer <path>",
+    value: "Minimized reproducer (diagnose defaults beneath --artifacts)",
+  },
   { label: "--patch <path>", value: "Candidate diff (default: candidate.diff)" },
   { label: "--proof <path>", value: "Proof matrix (default: flakelab.proof.json)" },
 ]
@@ -47,9 +50,14 @@ const PROVIDER_OPTIONS: DocumentRow[] = [
   { label: "--prompt-credentials", value: "Re-enter provider keys through a hidden prompt" },
 ]
 
+const REPOSITORY_OPTION: DocumentRow = {
+  label: "--config <path>",
+  value: "Resolve an otherwise ambiguous Playwright configuration",
+}
+
 const DISCOVERY_OPTIONS: DocumentRow[] = [
   { label: "--fault <family>", value: FAULTS },
-  { label: "--pattern <glob>", value: "Request pattern the network faults apply to" },
+  { label: "--pattern <glob>", value: "Override the automatically observed request target" },
   { label: "--trials <number>", value: "Trials per candidate batch" },
   { label: "--concurrency <n>", value: "Playwright workers per trial batch (default: 2)" },
   { label: "--min-rate <rate>", value: "Failure rate a trigger must reach to be confirmed" },
@@ -95,16 +103,20 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
       "flakelab diagnose tests/checkout.spec.ts --discover",
     ],
     options: [
+      REPOSITORY_OPTION,
+      { label: "--artifacts <dir>", value: "Default output directory (.flakelab/runs)" },
       { label: "--report <blob-report>", value: "Start from existing evidence instead of a scan" },
       { label: "--runs <number>", value: "Repetitions in the bounded control scan" },
       { label: "--discover", value: "Compare paired controls, then minimize a trigger" },
       { label: "--investigate", value: "Explicitly enable bounded Groq investigation" },
       { label: "--repair", value: "Explicitly enable Groq repair and isolated Solari proof" },
       { label: "--source <file>", value: "Approve one application source file (max 7)" },
-      { label: "--evidence <path>", value: "Investigation artifact path" },
-      { label: "--html <path>", value: "Portable evidence report path" },
+      { label: "--evidence <path>", value: "Investigation artifact (default: <artifacts>/investigation.json)" },
+      { label: "--reproducer <path>", value: "Reproducer (default: <artifacts>/reproducer.yaml)" },
+      { label: "--patch <path>", value: "Candidate diff (default: <artifacts>/candidate.diff)" },
+      { label: "--proof <path>", value: "Proof matrix (default: <artifacts>/proof.json)" },
+      { label: "--html <path>", value: "Portable report (default: <artifacts>/report.html)" },
       { label: "--open", value: "Open the generated report without prompting" },
-      ...EVIDENCE_OPTIONS,
       ...PROVIDER_OPTIONS,
       {
         label: "Bounds",
@@ -121,6 +133,7 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
       "flakelab discover tests/payload.spec.ts --fault response-truncation --max-remove-bytes 64",
     ],
     options: [
+      REPOSITORY_OPTION,
       ...DISCOVERY_OPTIONS,
       { label: "--output <path>", value: "Reproducer to write (default: flakelab.repro.yaml)" },
     ],
@@ -156,6 +169,7 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
       "flakelab tests/checkout.spec.ts --prove --fault viewport --viewport-width 390",
     ],
     options: [
+      REPOSITORY_OPTION,
       ...DISCOVERY_OPTIONS,
       { label: "--source <file>", value: "Approve one application source file (max 7)" },
       { label: "--html <path>", value: "Portable evidence report path" },
@@ -211,6 +225,7 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
       "flakelab scan tests/checkout.spec.ts --json",
     ],
     options: [
+      REPOSITORY_OPTION,
       { label: "--runs <number>", value: "Repetitions to run (default: 4)" },
       { label: "--concurrency <n>", value: "Playwright workers (default: 2)" },
       { label: "--artifacts <dir>", value: "Evidence directory (default: .flakelab/runs)" },

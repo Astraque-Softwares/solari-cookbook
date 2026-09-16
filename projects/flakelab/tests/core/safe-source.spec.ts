@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test"
 
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { tmpdir } from "node:os"
 
 import {
   discoverRepairSourceCandidates,
@@ -112,6 +113,30 @@ test("repair context includes explicitly approved application sources", async (
   ])
 })
 
+test("repair context accepts a test package and approved source from one workspace", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
+  const fixtureRoot = await prepareFixtureRoot(testInfo.outputPath("monorepo-repair-source"))
+  const testPath = resolve(fixtureRoot, "apps/shop-e2e/src/products.spec.ts")
+  const applicationPath = resolve(fixtureRoot, "packages/shop/data/src/use-products.ts")
+  await mkdir(resolve(testPath, ".."), { recursive: true })
+  await mkdir(resolve(applicationPath, ".."), { recursive: true })
+  await writeFile(testPath, "test('products', async () => true)\n", "utf8")
+  await writeFile(applicationPath, "export const loadProducts = () => fetch('/api/products')\n", "utf8")
+
+  const context = await readSafeRepairContext(
+    fixtureRoot,
+    "apps/shop-e2e/src/products.spec.ts:1",
+    ["packages/shop/data/src/use-products.ts"],
+  )
+
+  expect(context.map((source) => source.path.replaceAll("\\", "/"))).toEqual([
+    "apps/shop-e2e/src/products.spec.ts",
+    "packages/shop/data/src/use-products.ts",
+  ])
+})
+
 test("repair context extracts the relevant region from a large approved source", async (
   { browserName: _browserName },
   testInfo,
@@ -168,4 +193,47 @@ test("repair source discovery follows local imports from every test in a selecte
     expect.stringContaining("src/cart.ts"),
     expect.stringContaining("src/checkout.ts"),
   ])
+})
+
+test("repair source discovery accepts a Playwright line selector", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
+  const fixtureRoot = await prepareFixtureRoot(testInfo.outputPath("located-source-discovery"))
+  const testPath = resolve(fixtureRoot, "checkout.spec.ts")
+  const sourcePath = resolve(fixtureRoot, "checkout.ts")
+  await writeFile(
+    testPath,
+    'import { checkout } from "./checkout.js"\ntest(String(checkout), async () => true)\n',
+    "utf8",
+  )
+  await writeFile(sourcePath, "export const checkout = true\n", "utf8")
+
+  const candidates = await discoverRepairSourceCandidates(process.cwd(), `${testPath}:108`)
+
+  expect(candidates).toEqual([expect.stringContaining("checkout.ts")])
+})
+
+test("black-box tests rank application source without repository-specific rules", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "flakelab-source-ranking-"))
+  try {
+    await mkdir(resolve(root, "e2e"), { recursive: true })
+    await mkdir(resolve(root, "packages/shop/data/src/hooks"), { recursive: true })
+    await writeFile(
+      resolve(root, "e2e/products.spec.ts"),
+      "test('filters products by category', async ({ page }) => { await page.goto('/products') })\n",
+      "utf8",
+    )
+    await writeFile(
+      resolve(root, "packages/shop/data/src/hooks/use-products.ts"),
+      "export async function useProducts(category: string) { return fetch(`/products?category=${category}`) }\n",
+      "utf8",
+    )
+
+    const candidates = await discoverRepairSourceCandidates(root, "e2e/products.spec.ts:1")
+
+    expect(candidates[0]).toBe("packages/shop/data/src/hooks/use-products.ts")
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
 })

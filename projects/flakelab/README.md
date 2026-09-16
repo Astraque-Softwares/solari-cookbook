@@ -171,10 +171,14 @@ npx flakelab@latest diagnose tests/checkout.spec.ts
 npx flakelab@latest diagnose --report ./blob-report
 ```
 
-The command explains what was observed and writes `.flakelab/runs/diagnose.json` with the cheapest
-useful next experiment, its trial bound, an expected duration based on the local scan when
-available, required credentials, and the Solari estimate-or an explicit statement that no
-reliable estimate is available. Local diagnosis never requests provider credentials.
+The command explains what was observed and keeps its default outputs together under
+`.flakelab/runs`: the diagnosis checkpoint, scan and discovery evidence, reproducer,
+investigation, candidate diff, proof matrix, and HTML report. `--artifacts <path>` moves that
+default set as a unit, while the individual output options remain available as explicit
+overrides. The checkpoint records the cheapest useful next experiment, its trial bound, an
+expected duration based on the local scan when available, required credentials, and the Solari
+estimate-or an explicit statement that no reliable estimate is available. Local diagnosis never
+requests provider credentials.
 
 Continue only as far as the evidence justifies:
 
@@ -184,7 +188,13 @@ npx flakelab@latest diagnose tests/checkout.spec.ts --investigate
 npx flakelab@latest diagnose tests/checkout.spec.ts --repair
 ```
 
-`--discover` remains local and creates a minimized reproducer. `--investigate` explicitly enables
+`--discover` remains local. Automatic discovery builds a capability plan from the resolved test,
+observed request route, and repeated scan. It runs one exploratory probe for each applicable,
+not-yet-covered fault family across the configured concurrency and stops scheduling as soon as a
+signal appears. Only that signal continues to paired control/intervention confirmation and
+minimization. If every probe is clean, the diagnosis completes as `no-signal-observed`, retains
+the screened, covered, and inapplicable families with reasons in its discovery sidecar, and does
+not request provider credentials or invent a reproducer. `--investigate` explicitly enables
 bounded Groq usage and retains both the reproducer and investigation evidence. `--repair`
 explicitly enables candidate generation and a disposable Solari proof; a rejected candidate still
 produces the portable evidence report. When starting from `--report`, supply a test target before
@@ -353,6 +363,11 @@ Groq and Solari credentials are removed from the environment passed to Playwrigh
 Application-specific environment variables remain available so existing test suites continue to
 work. Provider keys are used only by the FlakeLab process at the API boundary and are never
 injected into disposable proof sandboxes.
+
+The complete AI investigation, candidate generation, and isolated proof journey needs both
+`GROQ_API_KEY` and `SOLARI_API_KEY`. Local scan, analysis, discovery, replay, and offline report
+generation need neither. For secure PowerShell, Bash/zsh, `.env`, and CI examples, see the
+[provider credential guide](../../docs/content/docs/credentials.mdx).
 
 To ignore an outdated shell or `.env` credential and enter replacements securely for one run:
 

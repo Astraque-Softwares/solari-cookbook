@@ -5,6 +5,10 @@ description: Five commands from a suspicious test to a proven candidate patch.
 
 Everything on this page is local and free until the final step, which is clearly marked.
 
+The final provider-backed journey requires both `GROQ_API_KEY` and `SOLARI_API_KEY`. You may enter
+them through hidden one-run prompts, a terminal environment, a local ignored `.env`, or protected
+CI secrets. See [Provider credentials](/docs/credentials) before the first proof run.
+
 ## 1. Check the environment
 
 ```bash
@@ -55,16 +59,17 @@ npx flakelab@latest discover tests/checkout.spec.ts \
   --pattern "**/api/checkout"
 ```
 
-Discovery alternates matched-seed control and intervention trials, minimizes the fault
-boundary, independently confirms the result, and writes `flakelab.repro.yaml` plus a JSON
-discovery sidecar.
+Automatic discovery screens only the applicable fault families, stops at the first causal signal,
+then alternates matched-seed control and intervention trials, minimizes the fault boundary, and
+independently confirms the result. Its reproducer and JSON discovery sidecar are written under
+`.flakelab/runs` by default.
 
 Pick the fault family that matches your suspicion - see the [fault catalog](/docs/faults).
 
 ## 4. Verify the reproducer
 
 ```bash
-npx flakelab@latest replay flakelab.repro.yaml
+npx flakelab@latest replay .flakelab/runs/reproducer.yaml
 ```
 
 Replay re-executes the exact saved fault set and checks that the recorded normalized failure
@@ -84,7 +89,7 @@ npx flakelab@latest prove tests/checkout.spec.ts \
 ```
 
 `prove` runs discovery, replay, investigation, repair, and reporting as one bounded
-pipeline. The candidate is returned as `candidate.diff` and is **never** applied to your
+pipeline. The candidate is returned as `.flakelab/runs/candidate.diff` and is **never** applied to your
 local checkout. To keep the reproducer somewhere else, pass
 `--reproducer .flakelab/runs/checkout.repro.yaml`; the complete pipeline uses that same path.
 
@@ -92,11 +97,11 @@ local checkout. To keep the reproducer somewhere else, pass
 
 | Artifact | Purpose |
 | --- | --- |
-| `flakelab.repro.yaml` | Portable, strict fault and confirmation recipe. |
-| `flakelab.investigation.json` | Hypotheses, experiments, and the bounded assessment. |
-| `candidate.diff` | A reviewable source patch. |
-| `flakelab.proof.json` | Static checks, hostile trials, controls, and regressions. |
-| `flakelab.report.html` | One self-contained offline evidence report. |
+| `.flakelab/runs/reproducer.yaml` | Portable, strict fault and confirmation recipe. |
+| `.flakelab/runs/investigation.json` | Hypotheses, experiments, and the bounded assessment. |
+| `.flakelab/runs/candidate.diff` | A reviewable source patch. |
+| `.flakelab/runs/proof.json` | Static checks, hostile trials, controls, and regressions. |
+| `.flakelab/runs/report.html` | One self-contained offline evidence report. |
 
 ## If a run is interrupted
 

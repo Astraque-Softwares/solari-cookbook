@@ -5,6 +5,8 @@ import { readInvestigationReport } from "../investigator/file.js"
 import { readProofOfFix } from "../repair/file.js"
 import { writePortableReport } from "../report/bundle.js"
 import { buildEvidenceReport } from "../report/model.js"
+import { assertRepositoryUnchanged } from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
 import { confirmLocalReportOpen, openLocalReport } from "../report/open.js"
 import { readReproducer } from "../reproducer/file.js"
 import { requireCredential } from "../security/credentials.js"
@@ -31,6 +33,14 @@ interface ReportVerdict {
   status: string
 }
 
+async function verifiedRepository(repository?: RepositoryProfile): Promise<{
+  repository?: RepositoryProfile
+}> {
+  if (!repository) return {}
+  await assertRepositoryUnchanged(repository)
+  return { repository }
+}
+
 function reportSummary(verdict: ReportVerdict): string {
   const document = new TerminalDocument(stderrTheme())
   document.entry(
@@ -50,6 +60,7 @@ function reportSummary(verdict: ReportVerdict): string {
 export async function generateReport(
   investigationPath: string,
   values: ReportOptions,
+  repository?: RepositoryProfile,
 ): Promise<void> {
   const projectRoot = process.cwd()
   const progress = new ProgressReporter()
@@ -60,6 +71,7 @@ export async function generateReport(
     readProofOfFix(resolve(projectRoot, values.proof)),
   ])
   progress.done(formatCount(investigation.experiments.length, "experiment"))
+  const repositoryEvidence = await verifiedRepository(repository)
 
   progress.start("classification", "ownership and redaction")
   const report = buildEvidenceReport({
@@ -71,6 +83,7 @@ export async function generateReport(
       reproducer: portablePath(projectRoot, values.reproducer),
     },
     proof,
+    ...repositoryEvidence,
     reproducer,
   })
   progress.done(report.ownership.classification)

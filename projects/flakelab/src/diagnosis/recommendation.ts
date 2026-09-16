@@ -1,6 +1,6 @@
 import type { DiagnoseOptions } from "../commands/options.js"
 import { integerOption, positiveNumberOption } from "../commands/options.js"
-import { networkDelayTrialBound } from "../discovery/minimize.js"
+import { automaticScreeningTrialBound } from "../discovery/automatic.js"
 import type { ScanStatus } from "../scan/schema.js"
 import { buildDiscoveryBudget } from "./discovery-budget.js"
 import type {
@@ -10,7 +10,9 @@ import type {
 
 interface RecommendationInput {
   elapsedMilliseconds: number
+  observedExecutions?: number
   observedRuns: number
+  selectedTestCount?: number
   stage: DiagnosisStage
   status: ScanStatus
   target?: string
@@ -21,10 +23,20 @@ function quoted(value: string): string {
   return JSON.stringify(value)
 }
 
-function discoveryTrialBound(values: DiagnoseOptions): number {
-  const trials = integerOption(values.trials, "trials")
-  const maximumDelay = integerOption(values["max-delay"], "max-delay")
-  return networkDelayTrialBound(trials, maximumDelay)
+function discoveryTrialBound(input: RecommendationInput, target: string): number {
+  const selectedTestCount = Math.max(1, input.selectedTestCount ?? 1)
+  const executions = input.observedExecutions ?? input.observedRuns * selectedTestCount
+  const workers = integerOption(input.values.concurrency, "concurrency")
+  return automaticScreeningTrialBound(target, {
+    ...(executions > 0 ? {
+      scan: {
+        clean: input.status === "no-failure-observed",
+        executions,
+        workers,
+      },
+    } : {}),
+    selectedTestCount,
+  })
 }
 
 function formattedDuration(seconds: number): string {
@@ -82,16 +94,16 @@ function localRecommendation(
 function observedRecommendation(input: RecommendationInput): DiagnosisRecommendation {
   const target = input.target ?? "<test-target>"
   if (input.status === "no-failure-observed") {
-    const plannedTrials = discoveryTrialBound(input.values)
+    const plannedTrials = discoveryTrialBound(input, target)
     return localRecommendation(
       input,
       plannedTrials,
       `flakelab diagnose ${quoted(target)} --discover`,
-      "The bounded control was clean; minimize one deterministic network-delay trigger next.",
+      "The bounded control was clean; screen applicable fault families and minimize the first causal trigger.",
     )
   }
   if (input.status === "mixed-outcomes") {
-    const plannedTrials = discoveryTrialBound(input.values)
+    const plannedTrials = discoveryTrialBound(input, target)
     return localRecommendation(
       input,
       plannedTrials,
@@ -118,6 +130,14 @@ function observedRecommendation(input: RecommendationInput): DiagnosisRecommenda
 export function buildDiagnosisRecommendation(
   input: RecommendationInput,
 ): DiagnosisRecommendation {
+  if (input.stage === "no-signal-observed") {
+    return localRecommendation(
+      input,
+      0,
+      null,
+      "No signal was observed in the applicable bounded screen; no causal reproducer or provider work is justified.",
+    )
+  }
   if (input.stage === "observed") {
     return observedRecommendation(input)
   }

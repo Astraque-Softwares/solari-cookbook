@@ -19,7 +19,7 @@ function packageVersion(): string {
 export const VERSION = packageVersion();
 
 const DOCUMENTATION =
-  "https://github.com/Astraque-Softwares/solari-cookbook/tree/main/projects/flakelab";
+  "https://github.com/kelvinguchu/solari-cookbook/tree/main/projects/flakelab";
 
 interface HelpGroup {
   rows: DocumentRow[];

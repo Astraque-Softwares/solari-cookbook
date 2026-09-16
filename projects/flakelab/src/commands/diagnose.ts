@@ -1,22 +1,17 @@
 import { readFile, stat } from "node:fs/promises"
-import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
+import { isAbsolute, relative, resolve, sep } from "node:path"
 import { z } from "zod"
 
 import { portableProjectPath } from "../artifacts/paths.js"
-import {
-  nextDiagnosisPhase,
-  readDiagnosisCheckpoint,
-} from "../diagnosis/checkpoint.js"
+import { nextDiagnosisPhase } from "../diagnosis/checkpoint.js"
 import {
   addDiagnosisUsage,
   analysisObservation,
   createDiagnosisContext,
   emptyObservation,
   emptyPaths,
-  restoreDiagnosisContext,
   saveDiagnosis,
   scanObservation,
-  updateDiagnosisWorkflow,
 } from "../diagnosis/run-state.js"
 import type {
   DiagnosisContext,
@@ -24,26 +19,27 @@ import type {
   Observation,
 } from "../diagnosis/run-state.js"
 import type { DiagnosisStage } from "../diagnosis/schema.js"
-import { buildDiscoveryBudget } from "../diagnosis/discovery-budget.js"
-import {
-  requestSolariProof,
-} from "../diagnosis/solari-handoff.js"
 import { formatDiagnosisSummary } from "../diagnosis/summary.js"
-import { discoverRepairSourceCandidates } from "../investigator/safe-source.js"
 import type { RequiredExperimentEvidence } from "../investigator/agent.js"
 import {
   experimentConditionSchema,
   experimentResultSchema,
 } from "../investigator/schema.js"
-import { preflightProofCredentials } from "../proof/preflight.js"
+import {
+  assertRepositoryUnchanged,
+  discoverAndWriteRepositoryProfile,
+} from "../project/profile.js"
+import type { RepositoryProfile } from "../project/schema.js"
 import { redactText } from "../report/redaction.js"
+import { SolariProofError } from "../repair/solari-validator.js"
 import { writeStdout } from "../ui/console.js"
 import { stdoutTheme } from "../ui/theme.js"
-import {
-  integerOption,
-  positiveNumberOption,
-} from "./options.js"
+import { integerOption } from "./options.js"
 import type { DiagnoseOptions } from "./options.js"
+import type { RepairResult } from "./repair.js"
+import type { ProofResources } from "../repair/solari-validator.js"
+import { offerSolariProof } from "./diagnosis-proof-offer.js"
+import { discoveryPathFor } from "./discovery-outcome.js"
 
 const discoveryEvidenceSchema = z.object({
   trigger: experimentConditionSchema,
@@ -70,6 +66,7 @@ async function collectObservation(
   values: DiagnoseOptions,
   paths: DiagnosisPaths,
   wantsDiscovery: boolean,
+  repository?: RepositoryProfile,
 ): Promise<Observation> {
   let observation = emptyObservation()
   const startedAt = Date.now()
@@ -91,10 +88,11 @@ async function collectObservation(
     const scanned = await scan(target ?? "", {
       artifacts: values.artifacts,
       concurrency: values.concurrency,
+      config: values.config,
       json: false,
       runs: values.runs,
       verbose: false,
-    })
+    }, repository)
     paths.scan = portableProjectPath(projectRoot, resolve(values.artifacts, "scan.json"))
     observation = scanObservation(scanned, Date.now() - scanStartedAt)
     process.exitCode = undefined
@@ -102,15 +100,17 @@ async function collectObservation(
   return observation
 }
 
-async function runDiscoveryStage(context: DiagnosisContext): Promise<void> {
+async function runDiscoveryStage(context: DiagnosisContext): Promise<DiagnosisStage> {
   const { projectRoot, target, values } = context
   const { discover } = await import("./discover.js")
   const startedAt = Date.now()
+  if (!context.repository) throw new Error("Diagnosis repository profile is missing")
   const result = await discover(target ?? "", {
     "animation-rate": "5",
     "clock-offset-ms": "3600000",
     concurrency: values.concurrency,
-    fault: "network-delay",
+    config: values.config,
+    fault: "auto",
     "jump-after-ms": "0",
     locale: "fr-FR",
     "max-delay": values["max-delay"],
@@ -133,7 +133,23 @@ async function runDiscoveryStage(context: DiagnosisContext): Promise<void> {
     trials: values.trials,
     "viewport-height": "667",
     "viewport-width": "375",
+  }, context.repository, {
+    scan: {
+      clean: context.checkpoint.observation.status === "no-failure-observed",
+      executions: context.checkpoint.observation.executions,
+      workers: integerOption(values.concurrency, "concurrency"),
+    },
+    selectedTestCount: Math.max(1, context.checkpoint.observation.tests),
   })
+  const discoveryPath = discoveryPathFor(resolve(projectRoot, values.reproducer))
+  context.checkpoint.artifacts.discovery = portableProjectPath(projectRoot, discoveryPath)
+  if ("screenings" in result) {
+    addDiagnosisUsage(context, {
+      elapsedMilliseconds: Date.now() - startedAt,
+      executions: result.trials,
+    })
+    return "no-signal-observed"
+  }
   context.checkpoint.artifacts.reproducer = portableProjectPath(projectRoot, values.reproducer)
   addDiagnosisUsage(context, {
     elapsedMilliseconds: Date.now() - startedAt,
@@ -145,6 +161,7 @@ async function runDiscoveryStage(context: DiagnosisContext): Promise<void> {
         0,
       ),
   })
+  return "reproducer-created"
 }
 
 async function readRequiredExperimentEvidence(
@@ -155,10 +172,7 @@ async function readRequiredExperimentEvidence(
     return undefined
   }
   const reproducerPath = resolve(context.projectRoot, reproducer)
-  const discoveryPath = resolve(
-    dirname(reproducerPath),
-    `${basename(reproducerPath, extname(reproducerPath))}.discovery.json`,
-  )
+  const discoveryPath = discoveryPathFor(reproducerPath)
   const artifact = discoveryEvidenceSchema.parse(JSON.parse(
     await readFile(discoveryPath, { encoding: "utf8" }),
   ))
@@ -170,6 +184,11 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
   const { investigate } = await import("./investigate.js")
   const startedAt = Date.now()
   const requiredEvidence = await readRequiredExperimentEvidence(context)
+  const evidencePattern = requiredEvidence && "pattern" in requiredEvidence.condition
+    && typeof requiredEvidence.condition.pattern === "string"
+    ? requiredEvidence.condition.pattern
+    : undefined
+  if (!context.repository) throw new Error("Diagnosis repository profile is missing")
   const report = await investigate(target ?? "", {
     concurrency: values.concurrency,
     "max-cost": values["max-cost"],
@@ -180,12 +199,12 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
     "max-trials": values["max-trials"],
     "min-rate": values["min-rate"],
     model: values.model,
-    pattern: values.pattern,
+    pattern: evidencePattern ?? values.pattern,
     "prompt-credentials": values["prompt-credentials"],
     report: values.evidence,
     seed: values.seed,
     trials: values.trials,
-  }, requiredEvidence)
+  }, requiredEvidence, context.repository)
   context.checkpoint.artifacts.evidence = portableProjectPath(projectRoot, values.evidence)
   addDiagnosisUsage(context, {
     aiEstimatedCostUsd: report.usage.estimatedCostUsd,
@@ -199,10 +218,42 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
   })
 }
 
+function recordProofUsage(
+  context: DiagnosisContext,
+  result: RepairResult,
+  elapsedMilliseconds: number,
+): void {
+  addDiagnosisUsage(context, {
+    aiEstimatedCostUsd: result.usage.estimatedCostUsd,
+    aiInputTokens: result.usage.inputTokens,
+    aiOutputTokens: result.usage.outputTokens,
+    elapsedMilliseconds,
+    executions: result.proof.beforeHostile.trials
+      + result.proof.afterHostile.trials
+      + result.proof.afterControl.trials
+      + result.proof.regressions.reduce(
+        (total, regression) => total + regression.result.trials,
+        0,
+      ),
+    solariSandboxesCreated: result.proof.resources?.created ?? 0,
+    solariSandboxesKilled: result.proof.resources?.released ?? 0,
+    solariCostUsd: null,
+  })
+}
+
+function recordProofCleanup(context: DiagnosisContext, resources?: ProofResources): void {
+  context.checkpoint.cleanup = {
+    liveResources: resources?.live ?? 0,
+    status: resources ? "confirmed" : "unconfirmed",
+  }
+}
+
 async function runRepairStage(context: DiagnosisContext): Promise<DiagnosisStage> {
   const { projectRoot, values } = context
   const { repair } = await import("./repair.js")
   const startedAt = Date.now()
+  if (!context.repository) throw new Error("Diagnosis repository profile is missing")
+  await assertRepositoryUnchanged(context.repository)
   const result = await repair(values.evidence, {
     concurrency: "1",
     "max-cost": values["max-cost"],
@@ -213,33 +264,18 @@ async function runRepairStage(context: DiagnosisContext): Promise<DiagnosisStage
     "prompt-credentials": values["prompt-credentials"],
     reproducer: values.reproducer,
     source: values.source,
-  })
+  }, context.repository)
   const repairRejected = process.exitCode === 1
   process.exitCode = undefined
   context.checkpoint.artifacts.patch = portableProjectPath(projectRoot, values.patch)
   context.checkpoint.artifacts.proof = portableProjectPath(projectRoot, values.proof)
-  addDiagnosisUsage(context, {
-    aiEstimatedCostUsd: result.usage.estimatedCostUsd,
-    aiInputTokens: result.usage.inputTokens,
-    aiOutputTokens: result.usage.outputTokens,
-    elapsedMilliseconds: Date.now() - startedAt,
-    executions: result.proof.beforeHostile.trials
-      + result.proof.afterHostile.trials
-      + result.proof.afterControl.trials
-      + result.proof.regressions.reduce(
-        (total, regression) => total + regression.result.trials,
-        0,
-      ),
-    solariSandboxesCreated: 1,
-    solariSandboxesKilled: 1,
-    solariCostUsd: null,
-  })
+  recordProofUsage(context, result, Date.now() - startedAt)
   context.checkpoint.cache = {
     key: null,
     reason: "Candidate proof uploads a unique patched workspace, so no prepared snapshot applies.",
     status: "not-used",
   }
-  context.checkpoint.cleanup = { liveResources: 0, status: "confirmed" }
+  recordProofCleanup(context, result.proof.resources)
   const stage = repairRejected ? "repair-rejected" : "repair-proven"
   const { generateReport } = await import("./report.js")
   await generateReport(values.evidence, {
@@ -250,15 +286,16 @@ async function runRepairStage(context: DiagnosisContext): Promise<DiagnosisStage
     "prompt-credentials": values["prompt-credentials"],
     publish: false,
     reproducer: values.reproducer,
-  })
+  }, context.repository)
   context.checkpoint.artifacts.html = portableProjectPath(projectRoot, values.html)
-  if (repairRejected) {
-    process.exitCode = 1
-  }
+  if (repairRejected) process.exitCode = 1
   return stage
 }
 
 function finalStage(context: DiagnosisContext, stage: DiagnosisStage): boolean {
+  if (stage === "no-signal-observed") {
+    return true
+  }
   if (stage === "repair-proven" || stage === "repair-rejected") {
     return true
   }
@@ -281,31 +318,6 @@ function confinedProjectPath(projectRoot: string, path: string): string {
   return absolute
 }
 
-function validateResumePaths(context: DiagnosisContext): void {
-  const { checkpoint, projectRoot, target, values } = context
-  const optionPaths = [
-    values.artifacts,
-    values.baseline,
-    values.evidence,
-    values.html,
-    values.patch,
-    values.proof,
-    values.report,
-    values.reproducer,
-    target,
-  ]
-  for (const path of optionPaths) {
-    if (path) {
-      confinedProjectPath(projectRoot, path)
-    }
-  }
-  for (const path of Object.values(checkpoint.artifacts)) {
-    if (path) {
-      confinedProjectPath(projectRoot, path)
-    }
-  }
-}
-
 async function requireCheckpointArtifact(
   context: DiagnosisContext,
   name: "evidence" | "reproducer",
@@ -323,8 +335,7 @@ async function requireCheckpointArtifact(
 async function runNextPhase(context: DiagnosisContext): Promise<DiagnosisStage> {
   const phase = nextDiagnosisPhase(context.checkpoint)
   if (phase === "discover") {
-    await runDiscoveryStage(context)
-    return "reproducer-created"
+    return runDiscoveryStage(context)
   }
   if (phase === "investigate") {
     await requireCheckpointArtifact(context, "reproducer")
@@ -343,7 +354,32 @@ function interrupted(error: Error): boolean {
   return error.name === "AbortError" || /abort|interrupt/iu.test(error.message)
 }
 
-async function continueDiagnosis(context: DiagnosisContext): Promise<void> {
+function recordDiagnosisFailure(context: DiagnosisContext, error: Error): void {
+  if (nextDiagnosisPhase(context.checkpoint) !== "repair") return
+  if (error instanceof SolariProofError) {
+    context.checkpoint.usage.actual.solariSandboxesCreated += error.resources.created
+    context.checkpoint.usage.actual.solariSandboxesKilled += error.resources.released
+    context.checkpoint.cleanup = {
+      liveResources: error.resources.live,
+      status: error.resources.live === 0 ? "confirmed" : "unconfirmed",
+    }
+  } else {
+    context.checkpoint.cleanup = { liveResources: null, status: "unconfirmed" }
+  }
+  context.checkpoint.usage.actual.solariCostUsd = null
+}
+
+async function saveFailedDiagnosis(context: DiagnosisContext, error: Error): Promise<void> {
+  recordDiagnosisFailure(context, error)
+  await saveDiagnosis(
+    context,
+    context.checkpoint.stage,
+    interrupted(error) ? "interrupted" : "failed",
+    redactText(error.message).slice(0, 2_000),
+  )
+}
+
+export async function continueSavedDiagnosis(context: DiagnosisContext): Promise<void> {
   const portableArtifactPath = portableProjectPath(context.projectRoot, context.artifactPath)
   if (nextDiagnosisPhase(context.checkpoint) === "complete") {
     const artifact = await saveDiagnosis(context, context.checkpoint.stage, "complete")
@@ -358,98 +394,48 @@ async function continueDiagnosis(context: DiagnosisContext): Promise<void> {
     }
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error("Diagnosis phase failed")
-    if (nextDiagnosisPhase(context.checkpoint) === "repair") {
-      context.checkpoint.cleanup = { liveResources: null, status: "unconfirmed" }
-      context.checkpoint.usage.actual.solariCostUsd = null
-    }
-    await saveDiagnosis(
-      context,
-      context.checkpoint.stage,
-      interrupted(error) ? "interrupted" : "failed",
-      redactText(error.message).slice(0, 2_000),
-    )
+    await saveFailedDiagnosis(context, error)
     throw error
   }
   writeStdout(formatDiagnosisSummary(context.checkpoint, portableArtifactPath, stdoutTheme()))
 }
 
-function discoveryBudget(context: DiagnosisContext): {
-  configuredSeconds: number
-  estimatedSeconds: number
-  recommendedSeconds: number
-} {
-  const { checkpoint, values } = context
-  return buildDiscoveryBudget({
-    concurrency: integerOption(values.concurrency, "concurrency"),
-    configuredSeconds: positiveNumberOption(values["max-seconds"], "max-seconds"),
-    elapsedMilliseconds: checkpoint.observation.elapsedMilliseconds,
-    observedRuns: integerOption(values.runs, "runs"),
-    plannedTrials: checkpoint.recommendation.plannedTrials,
-  })
-}
-
-async function offerSolariProof(context: DiagnosisContext): Promise<void> {
-  const { target, values } = context
-  if (!target) {
-    return
-  }
-  if (values.repair) {
-    return
-  }
-  const request = await requestSolariProof(values.source, discoveryBudget(context), {
-    discoverSources: async () => discoverRepairSourceCandidates(context.projectRoot, target),
-  })
-  if (!request) {
-    return
-  }
-  await preflightProofCredentials(values["prompt-credentials"])
-  updateDiagnosisWorkflow(context, {
-    ...values,
-    discover: true,
-    investigate: true,
-    "max-seconds": String(request.maxSeconds),
-    repair: true,
-    source: request.sources,
-  })
-  try {
-    await continueDiagnosis(context)
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : "Proof pipeline failed"
-    const checkpoint = portableProjectPath(context.projectRoot, context.artifactPath)
-    throw new Error(
-      `${message}\nSaved completed stages. Resume with: flakelab resume "${checkpoint}"`,
-      { cause },
-    )
-  }
-}
-
 export async function diagnose(
   target: string | undefined,
   values: DiagnoseOptions,
+  repositoryRestart = 0,
 ): Promise<void> {
   const projectRoot = process.cwd()
+  const repository = await discoverAndWriteRepositoryProfile({
+    artifactDirectory: values.artifacts,
+    config: values.config,
+    invocationRoot: projectRoot,
+    target,
+  })
   const artifactPath = resolve(projectRoot, values.artifacts, "diagnose.json")
   const portableArtifactPath = portableProjectPath(projectRoot, artifactPath)
   const paths = emptyPaths()
-  const wantsDiscovery = values.discover || values.investigate || values.repair
+  const wantsDiscovery = [values.discover, values.investigate, values.repair].includes(true)
   const observation = await collectObservation(
     projectRoot,
     target,
     values,
     paths,
     wantsDiscovery,
+    repository,
   )
   const context = createDiagnosisContext({
     artifactPath,
     observation,
     paths,
     projectRoot,
-    ...(target ? { target } : {}),
+    repository,
+    target,
     values,
   })
   await saveDiagnosis(context, "observed", wantsDiscovery ? "running" : "complete")
-  const supportsControlledDiscovery = observation.status === "no-failure-observed"
-    || observation.status === "mixed-outcomes"
+  const supportsControlledDiscovery = ["no-failure-observed", "mixed-outcomes"]
+    .includes(observation.status)
   if (!target || !supportsControlledDiscovery) {
     if (!wantsDiscovery) {
       writeStdout(formatDiagnosisSummary(context.checkpoint, portableArtifactPath, stdoutTheme()))
@@ -461,15 +447,11 @@ export async function diagnose(
     await saveDiagnosis(context, "observed", "failed", error.message)
     throw error
   }
-  await continueDiagnosis(context)
-  await offerSolariProof(context)
+  await continueSavedDiagnosis(context)
+  await offerSolariProof(context, repositoryRestart, diagnose)
 }
 
 export async function resumeDiagnosis(path: string): Promise<void> {
-  const projectRoot = process.cwd()
-  const artifactPath = resolve(projectRoot, path)
-  const checkpoint = await readDiagnosisCheckpoint(artifactPath)
-  const context = restoreDiagnosisContext(artifactPath, checkpoint, projectRoot)
-  validateResumePaths(context)
-  await continueDiagnosis(context)
+  const { resumeSavedDiagnosis } = await import("./resume-diagnosis.js")
+  await resumeSavedDiagnosis(path)
 }

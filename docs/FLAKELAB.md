@@ -253,11 +253,12 @@ After an eligible interactive diagnosis, FlakeLab asks `Use Solari to prove a ca
 | `--investigate`          | off                           | Explicitly enable bounded Groq investigation.                 |
 | `--repair`               | off                           | Explicitly enable candidate generation and Solari proof.      |
 | `--source <file>`        | none                          | Approve an application source file; repeat up to seven times. |
-| `--evidence <path>`      | `flakelab.investigation.json` | Investigation artifact.                                       |
-| `--reproducer <path>`    | `flakelab.repro.yaml`         | Reproducer artifact.                                          |
-| `--patch <path>`         | `candidate.diff`              | Candidate diff.                                               |
-| `--proof <path>`         | `flakelab.proof.json`         | Proof matrix.                                                 |
-| `--html <path>`          | `flakelab.report.html`        | Portable report.                                              |
+| `--artifacts <dir>`      | `.flakelab/runs`                  | Root for default diagnosis artifacts.                      |
+| `--evidence <path>`      | `<artifacts>/investigation.json` | Investigation artifact.                                    |
+| `--reproducer <path>`    | `<artifacts>/reproducer.yaml`    | Reproducer artifact.                                       |
+| `--patch <path>`         | `<artifacts>/candidate.diff`     | Candidate diff.                                            |
+| `--proof <path>`         | `<artifacts>/proof.json`         | Proof matrix.                                              |
+| `--html <path>`          | `<artifacts>/report.html`        | Portable report.                                          |
 | `--open`                 | off                           | Open the generated report without prompting.                  |
 | `--model <name>`         | `qwen/qwen3.8-27b`            | Groq model identifier.                                        |
 | `--max-cost <usd>`       | `0.25`                        | Model spend ceiling checked before work starts.               |
@@ -471,12 +472,12 @@ A bounded run that sees no failure does not claim permanent stability. It report
 | Scan              | `.flakelab/runs/scan.json`     | Per-test outcomes, intervals, signatures, and bounded attachment references. |
 | Analysis          | `.flakelab/runs/analyze.json`  | Validated CI report triage and baseline comparison.                          |
 | Diagnosis         | `.flakelab/runs/diagnose.json` | Checkpoint, plan, actual usage, cleanup, and resumable phase state.          |
-| Reproducer        | `flakelab.repro.yaml`          | Portable, strict fault and confirmation recipe.                              |
+| Reproducer        | `.flakelab/runs/reproducer.yaml` | Portable, strict fault and confirmation recipe.                            |
 | Discovery sidecar | next to reproducer             | Candidate-by-candidate control/intervention evidence.                        |
-| Investigation     | `flakelab.investigation.json`  | Hypotheses, experiments, assessment, and bounded source context.             |
-| Candidate         | `candidate.diff`               | Reviewable application-source patch, never auto-applied.                     |
-| Proof             | `flakelab.proof.json`          | Static checks, hostile trials, controls, regressions, and cleanup.           |
-| Report            | `flakelab.report.html`         | Self-contained offline evidence UI.                                          |
+| Investigation     | `.flakelab/runs/investigation.json` | Hypotheses, experiments, assessment, and bounded source context.        |
+| Candidate         | `.flakelab/runs/candidate.diff` | Reviewable application-source patch, never auto-applied.                    |
+| Proof             | `.flakelab/runs/proof.json`    | Static checks, hostile trials, controls, regressions, and cleanup.            |
+| Report            | `.flakelab/runs/report.html`   | Self-contained offline evidence UI.                                           |
 | Bisect            | `flakelab.bisect.json`         | Revision measurements, intervals, decisions, and exact/uncertain boundary.   |
 
 Human output goes to the terminal. Machine-readable `--json` output stays clean on stdout while progress goes to stderr. Evidence paths are project-relative; paths outside the project are reduced to a non-identifying placeholder and basename.
@@ -718,6 +719,6 @@ Before publishing a docs update:
 ## Project links
 
 - npm: [flakelab](https://www.npmjs.com/package/flakelab)
-- source: [Astraque-Softwares/solari-cookbook](https://github.com/Astraque-Softwares/solari-cookbook/tree/main/projects/flakelab)
+- source: [kelvinguchu/solari-cookbook](https://github.com/kelvinguchu/solari-cookbook/tree/main/projects/flakelab)
 - Fumadocs: [fumadocs.dev](https://www.fumadocs.dev/)
 - Next.js on Vercel: [Vercel framework guide](https://vercel.com/docs/frameworks/full-stack/nextjs)

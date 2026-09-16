@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { join, posix, relative, resolve, sep } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
+import { randomUUID } from "node:crypto"
 import { z } from "zod"
 
 import type { ExperimentResult } from "../discovery/evaluate.js"
@@ -13,6 +14,15 @@ import type { Reproducer } from "../reproducer/schema.js"
 import { retryTransient } from "../solari/retry.js"
 import { projectPlan } from "./project-plan.js"
 import type { ProjectCommand } from "./project-plan.js"
+import {
+  cleanupProofSandbox,
+  completedProof,
+  SolariProofError,
+} from "./solari-resources.js"
+import type { ProofResources } from "./solari-resources.js"
+
+export { SolariProofError }
+export type { ProofResources }
 
 const REMOTE_ROOT = "/work/flakelab"
 const REMOTE_SETUP_ROOT = "/work/flakelab/.flakelab/setup"
@@ -26,6 +36,7 @@ interface RemoteValidationOptions {
   apiKey: string
   baseUrl: string
   concurrency: number
+  configPath?: string
   regressionSelectors: string[]
   reproducer: Reproducer
   signal?: AbortSignal
@@ -41,6 +52,7 @@ export interface RemoteValidationResult {
   regressions: { selector: string; result: ExperimentResult }[]
   typecheck: boolean | null
   typecheckDiagnostic?: string
+  resources: ProofResources
 }
 
 interface ProjectFile {
@@ -283,6 +295,7 @@ function proofArguments(
     String(options.reproducer.seed),
     "--min-rate",
     String(options.reproducer.expectedFailure.minimumRate),
+    ...(options.configPath ? ["--config", options.configPath] : []),
     ...remoteFaultArguments(options.reproducer.faults, hostile),
   ]
 }
@@ -314,7 +327,7 @@ async function runExperiment(
 async function validateInSandbox(
   sandbox: Sandbox,
   options: RemoteValidationOptions,
-): Promise<RemoteValidationResult> {
+): Promise<Omit<RemoteValidationResult, "resources">> {
   await sandbox.connect()
   await uploadProject(sandbox, resolve(options.workspaceRoot))
   await runCommand(sandbox, "mkdir", ["-p", REMOTE_SETUP_ROOT])
@@ -397,26 +410,43 @@ export async function validatePatchInSolari(
     baseUrl: options.baseUrl,
     callTimeoutMs: COMMAND_TIMEOUT_MS,
   })
-  const sandbox = await retryTransient(
-    async () => client.create({
-      template: "base",
-      cpu: 4,
-      diskGb: PROOF_DISK_GB,
-      memMb: 8_192,
-      timeoutMs: SANDBOX_TIMEOUT_MS,
-      lifecycle: { onTimeout: "kill" },
-      metadata: { product: "flakelab", role: "patch-proof" },
-    }),
-    {
-      attempts: 5,
-      baseDelayMs: 500,
-      signal: options.signal,
-    },
-  )
+  const runMarker = randomUUID()
+  const resources: ProofResources = { created: 0, live: 0, released: 0 }
+  let sandbox: Sandbox
   try {
-    return await validateInSandbox(sandbox, options)
-  } finally {
-    sandbox.close()
-    await sandbox.kill()
+    sandbox = await retryTransient(
+      async () => client.create({
+        template: "base",
+        cpu: 4,
+        diskGb: PROOF_DISK_GB,
+        memMb: 8_192,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
+        lifecycle: { onTimeout: "kill" },
+        metadata: { product: "flakelab", role: "patch-proof", run: runMarker },
+      }),
+      {
+        attempts: 5,
+        baseDelayMs: 500,
+        signal: options.signal,
+      },
+    )
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error("Solari sandbox creation failed")
+    throw new SolariProofError(error.message, resources, error)
   }
+  resources.created = 1
+  let result: Omit<RemoteValidationResult, "resources"> | undefined
+  let failure: Error | undefined
+  try {
+    result = await validateInSandbox(sandbox, options)
+  } catch (cause) {
+    failure = cause instanceof Error ? cause : new Error("Solari proof failed")
+  }
+  const cleanupFailure = await cleanupProofSandbox(
+    client,
+    sandbox,
+    runMarker,
+    resources,
+  )
+  return completedProof(result, resources, cleanupFailure ?? failure)
 }
