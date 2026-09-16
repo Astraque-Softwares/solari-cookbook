@@ -3,31 +3,46 @@ import type { ReactNode } from "react";
 import { GeistMono } from "geist/font/mono";
 import { RootProvider } from "fumadocs-ui/provider/next";
 
+import { pageMetadata, siteDescription, siteName, siteTagline } from "@/lib/seo";
+import { repoUrl, siteUrl } from "@/lib/site";
+
 import "./global.css";
 
-const DESCRIPTION =
-  "FlakeLab finds, reproduces, explains, and proves fixes for flaky Playwright tests " +
-  "with deterministic fault experiments, bounded AI reasoning, and disposable Solari sandboxes.";
+const defaultTitle = `${siteName} - ${siteTagline}`;
+
+const defaults = pageMetadata({
+  description: siteDescription,
+  image: `${siteUrl}/og/home.png`,
+  path: "/",
+  socialTitle: defaultTitle,
+  title: {
+    default: defaultTitle,
+    template: `%s - ${siteName}`,
+  },
+  type: "website",
+});
 
 export const metadata: Metadata = {
-  applicationName: "FlakeLab",
-  description: DESCRIPTION,
-  metadataBase: new URL("https://flakelab.vercel.app"),
-  openGraph: {
-    description: DESCRIPTION,
-    siteName: "FlakeLab",
-    title: "FlakeLab - find the trigger, prove the fix",
-    type: "website",
-  },
-  title: {
-    default: "FlakeLab - find the trigger, prove the fix",
-    template: "%s · FlakeLab",
-  },
-  twitter: {
-    card: "summary_large_image",
-    description: DESCRIPTION,
-    title: "FlakeLab - find the trigger, prove the fix",
-  },
+  ...defaults,
+  // Canonical URLs are set per page; a layout-level one would leak onto every route.
+  alternates: undefined,
+  applicationName: siteName,
+  authors: [{ name: "Kelvin Guchu", url: repoUrl }],
+  category: "technology",
+  creator: "Kelvin Guchu",
+  keywords: [
+    "flaky tests",
+    "Playwright",
+    "test flakiness",
+    "fault injection",
+    "test reliability",
+    "CI",
+    "end-to-end testing",
+    "FlakeLab",
+    "Solari",
+  ],
+  metadataBase: new URL(siteUrl),
+  robots: { follow: true, index: true },
 };
 
 export const viewport: Viewport = {

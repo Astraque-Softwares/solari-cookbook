@@ -11,10 +11,19 @@ import {
   PipelineRail,
   PrincipleBanner,
 } from "@/components/home/sections"
-import { packageUrl } from "@/lib/site"
+import { pageMetadata, siteDescription, siteName, siteTagline } from "@/lib/seo"
+import { packageUrl, siteUrl } from "@/lib/site"
 
 export const metadata: Metadata = {
-  alternates: { canonical: "/" },
+  ...pageMetadata({
+    description: siteDescription,
+    image: `${siteUrl}/og/home.png`,
+    path: "/",
+    socialTitle: `${siteName} - ${siteTagline}`,
+    title: { absolute: `${siteName} - ${siteTagline}` },
+    type: "website",
+  }),
+  alternates: { canonical: siteUrl },
 }
 
 /**

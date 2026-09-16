@@ -10,7 +10,8 @@ import { createRelativeLink } from "fumadocs-ui/mdx"
 
 import { getMDXComponents } from "@/components/mdx"
 import { PageActions } from "@/components/page-actions"
-import { markdownUrlFor, repoDocsUrl, siteUrl } from "@/lib/site"
+import { docsOgImageUrl, docsPageTitle, pageMetadata, siteDescription } from "@/lib/seo"
+import { markdownUrlFor, repoDocsUrl } from "@/lib/site"
 import { source } from "@/lib/source"
 
 interface DocumentationPageProps {
@@ -56,15 +57,14 @@ export async function generateMetadata({ params }: DocumentationPageProps): Prom
     notFound()
   }
 
-  return {
-    alternates: { canonical: `${siteUrl}${page.url}` },
-    description: page.data.description,
-    openGraph: {
-      description: page.data.description,
-      title: page.data.title,
-      type: "article",
-      url: `${siteUrl}${page.url}`,
-    },
-    title: page.data.title,
-  }
+  const isIndex = page.slugs.length === 0
+  const title = docsPageTitle(page.slugs, page.data.title)
+
+  return pageMetadata({
+    description: page.data.description ?? siteDescription,
+    image: docsOgImageUrl(page.slugs),
+    path: page.url,
+    socialTitle: isIndex ? "FlakeLab docs" : title,
+    title: isIndex ? "Documentation" : title,
+  })
 }
