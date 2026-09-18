@@ -67,9 +67,10 @@ npx flakelab@latest discover tests/checkout.spec.ts \
   --pattern "**/api/checkout"
 ```
 
-Automatic discovery screens only the applicable fault families, stops at the first causal signal,
-then alternates matched-seed control and intervention trials, minimizes the fault boundary, and
-independently confirms the result. Its reproducer and JSON discovery sidecar are written under
+Automatic discovery screens applicable fault families one at a time, stops at the first signal,
+then alternates matched-seed control and intervention trials and evaluates after 4, 6, and at most
+8 pairs. It confirms the configured robust fault instead of searching for a fragile minimum. Its
+reproducer and JSON discovery sidecar are written under
 `.flakelab/runs` by default.
 
 Pick the fault family that matches your suspicion - see the [fault catalog](/docs/faults).

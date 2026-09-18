@@ -39,7 +39,7 @@ test("temporal discovery confirms each fault in an independent batch", async () 
   expect(locale.trigger).toMatchObject({ kind: "locale", locale: "fr-FR" })
   expect(timezone.trigger).toMatchObject({ kind: "timezone", timezoneId: "America/New_York" })
   expect([clock, locale, timezone].map((result) => result.triggerResult.trials))
-    .toEqual([12, 12, 12])
+    .toEqual([4, 4, 4])
 })
 
 test("browser context options contain no unrelated fault metadata", () => {

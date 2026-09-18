@@ -11,6 +11,7 @@ import type {
 interface RecommendationInput {
   elapsedMilliseconds: number
   observedExecutions?: number
+  observedFailures?: number
   observedRuns: number
   selectedTestCount?: number
   stage: DiagnosisStage
@@ -27,7 +28,7 @@ function discoveryTrialBound(input: RecommendationInput, target: string): number
   const selectedTestCount = Math.max(1, input.selectedTestCount ?? 1)
   const executions = input.observedExecutions ?? input.observedRuns * selectedTestCount
   const workers = integerOption(input.values.concurrency, "concurrency")
-  return automaticScreeningTrialBound(target, {
+  const screening = automaticScreeningTrialBound(target, {
     ...(executions > 0 ? {
       scan: {
         clean: input.status === "no-failure-observed",
@@ -37,6 +38,7 @@ function discoveryTrialBound(input: RecommendationInput, target: string): number
     } : {}),
     selectedTestCount,
   })
+  return Math.min(28, screening + 16)
 }
 
 function formattedDuration(seconds: number): string {
@@ -99,10 +101,20 @@ function observedRecommendation(input: RecommendationInput): DiagnosisRecommenda
       input,
       plannedTrials,
       `flakelab diagnose ${quoted(target)} --discover`,
-      "The bounded control was clean; screen applicable fault families and minimize the first causal trigger.",
+      "The bounded control was clean; screen applicable fault families and confirm the first causal trigger.",
     )
   }
   if (input.status === "mixed-outcomes") {
+    const executions = input.observedExecutions ?? input.observedRuns
+    const nativeRate = executions === 0 ? 0 : (input.observedFailures ?? 0) / executions
+    if (nativeRate > 0.25) {
+      return localRecommendation(
+        input,
+        0,
+        null,
+        "The test already reproduces naturally above the 25% triage threshold; retain the native failure evidence instead of attributing it to an injected fault.",
+      )
+    }
     const plannedTrials = discoveryTrialBound(input, target)
     return localRecommendation(
       input,
@@ -150,7 +162,7 @@ export function buildDiagnosisRecommendation(
       credentials: ["GROQ_API_KEY"],
       expectedDuration: `bounded to ${input.values["max-seconds"]} second(s) of investigator time`,
       plannedTrials: integerOption(input.values["max-trials"], "max-trials"),
-      rationale: "The minimized trigger is ready for evidence-bounded hypothesis testing.",
+      rationale: "The confirmed robust trigger is ready for evidence-bounded hypothesis testing.",
       solariCostEstimateUsd: 0,
       solariCostNote: "Investigation does not use Solari; estimated Solari cost is $0.",
     }

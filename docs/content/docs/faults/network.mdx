@@ -18,8 +18,8 @@ flakelab discover tests/checkout.spec.ts \
   --max-delay 250
 ```
 
-Discovery minimizes toward the smallest delay that still changes the outcome, so the result
-reads as a boundary - "fails at 61 ms, passes at 60 ms" - rather than a blunt timeout.
+Discovery confirms the configured maximum delay with matched no-op-proxy controls. Saving the
+robust value avoids a fragile one-millisecond boundary that may move between machines.
 
 ## `response-truncation`
 
@@ -32,7 +32,7 @@ flakelab discover tests/payload.spec.ts \
   --max-remove-bytes 64
 ```
 
-Minimization finds the smallest number of removed bytes that breaks parsing or rendering.
+Discovery confirms the configured removal bound before saving it.
 
 ## `response-duplication`
 

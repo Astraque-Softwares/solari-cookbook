@@ -50,8 +50,7 @@ matched clean control; a fault that never actually applies is not counted as cau
 
 - Every fault has a strict schema, a deterministic seed or value, a safe bound, and a stable
   artifact representation.
-- Faults are composable, and the minimizer can remove irrelevant faults and shrink numeric
-  values.
+- Faults are composable, and an explicit multi-fault investigation can remove irrelevant faults.
 - Every fault has a control comparison and cannot be declared causal from a failing run
   alone.
 - Cleanup is proven on pass, failure, timeout, cancellation, and provider error.

@@ -107,7 +107,7 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
       { label: "--artifacts <dir>", value: "Default output directory (.flakelab/runs)" },
       { label: "--report <blob-report>", value: "Start from existing evidence instead of a scan" },
       { label: "--runs <number>", value: "Repetitions in the bounded control scan" },
-      { label: "--discover", value: "Compare paired controls, then minimize a trigger" },
+      { label: "--discover", value: "Screen locally, then confirm one causal trigger" },
       { label: "--investigate", value: "Explicitly enable bounded Groq investigation" },
       { label: "--repair", value: "Explicitly enable Groq repair and isolated Solari proof" },
       { label: "--source <file>", value: "Approve one application source file (max 7)" },
@@ -137,7 +137,7 @@ export const COMMAND_HELP: Record<HelpTopic, CommandHelp> = {
       ...DISCOVERY_OPTIONS,
       { label: "--output <path>", value: "Reproducer to write (default: flakelab.repro.yaml)" },
     ],
-    summary: "Search one fault family for the smallest deterministic trigger, then confirm it.",
+    summary: "Screen one fault family and confirm a robust causal trigger.",
     usage: "flakelab discover <test> [options]",
   },
   doctor: {

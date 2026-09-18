@@ -197,10 +197,11 @@ npx flakelab@latest diagnose tests/checkout.spec.ts --repair
 ```
 
 `--discover` remains local. Automatic discovery builds a capability plan from the resolved test,
-observed request route, and repeated scan. It runs one exploratory probe for each applicable,
-not-yet-covered fault family across the configured concurrency and stops scheduling as soon as a
-signal appears. Only that signal continues to paired control/intervention confirmation and
-minimization. If every probe is clean, the diagnosis completes as `no-signal-observed`, retains
+observed request route, and repeated scan. It runs one sequential exploratory probe for each
+applicable, not-yet-covered fault family and stops immediately when a signal appears. Only that
+signal continues to matched control/intervention confirmation at 4, 6, and at most 8 pairs. The
+whole discovery phase has a hard 28-execution ceiling. If every probe is clean, the diagnosis
+completes as `no-signal-observed`, retains
 the screened, covered, and inapplicable families with reasons in its discovery sidecar, and does
 not request provider credentials or invent a reproducer. `--investigate` explicitly enables
 bounded Groq usage and retains both the reproducer and investigation evidence. `--repair`
@@ -232,10 +233,10 @@ template, runtime command, application path, port, and timeout matches. The metr
 the key and a reason for every hit or miss. Candidate repair workspaces are intentionally not
 cached because each contains a unique patch; their checkpoint explains that decision.
 
-## Discover and replay a minimal reproducer
+## Discover and replay a robust reproducer
 
-Run repeated baseline and fault trials, then minimize the delay that crosses the configured
-failure-rate and confidence thresholds:
+Run matched control and fault trials, then confirm a robust configured fault using a sequential
+causal gate:
 
 ```bash
 pnpm flakelab discover tests/fixtures/flaky-checkout.spec.ts \
@@ -249,13 +250,15 @@ pnpm flakelab discover tests/fixtures/flaky-checkout.spec.ts \
   --output flakelab.repro.yaml
 ```
 
-The command writes a strict portable YAML reproducer and a JSON discovery sidecar containing
-the evidence for every candidate. Every candidate alternates matched-seed control and intervention
-trials. A pre-existing failure is allowed, but the intervention is causal only when the same
-normalized failure signature reaches the requested rate and its 80% lower confidence bound exceeds
-the control's upper bound. Discovery prints each completed trial to stderr
-and stops at the ten-minute default elapsed-time ceiling; set `--max-seconds` explicitly when a
-suite needs a different local budget. Replay the result with:
+The command writes a strict portable YAML reproducer and a JSON discovery sidecar containing the
+evidence. Control and intervention trials share seeds and both traverse the same proxy path; the
+control proxy performs no mutation. A pre-existing failure is allowed, but the intervention is
+causal only when the same normalized failure signature is dominant, reaches the practical failure
+rate, keeps the control rate low, and passes the one-sided Fisher exact gate. FlakeLab evaluates
+after 4, 6, and at most 8 pairs and stops as soon as the result is decisive. Wilson intervals remain
+in the artifact as descriptive uncertainty, not the causal acceptance rule. Discovery also stops
+at the 28-execution or elapsed-time ceiling, whichever arrives first. Set `--max-seconds`
+explicitly when a suite needs a different local budget. Replay the result with:
 
 ```bash
 pnpm flakelab replay flakelab.repro.yaml --concurrency 1
@@ -263,8 +266,8 @@ pnpm flakelab replay flakelab.repro.yaml --concurrency 1
 
 The current project-level fault matrix supports deterministic network delay, type-aware resource
 loading delay, injected HTTP failures, response truncation, response-tail duplication, and response
-reordering. Minimize
-malformed payload triggers with `--fault response-truncation --max-remove-bytes 1024` or
+reordering. Probe malformed payload handling with
+`--fault response-truncation --max-remove-bytes 1024` or
 `--fault response-duplication --max-duplicate-bytes 1024`. Find request races with
 `--fault response-reordering --max-hold-ms 250`; the first response in each adjacent matching pair
 is held while the second proceeds. Response mutations run in the order stored in the bounded fault
@@ -272,9 +275,9 @@ set, so a reproducer can express and replay an exact composition without introdu
 Isolate startup dependencies with
 `--fault resource-loading-delay --resource-type script --pattern "**/assets/*" --max-delay 250`.
 Resource loading can target `document`, `script`, `stylesheet`, `image`, or `font` without slowing
-unrelated API traffic. Discovery reports the minimum observed timing boundary and saves a
-stability-margin trigger between that boundary and the configured maximum, so the portable
-reproducer is less sensitive to ordinary machine jitter.
+unrelated API traffic. Discovery saves the confirmed configured value instead of searching for a
+fragile one-unit boundary, so the portable reproducer remains useful across ordinary machine
+jitter.
 Delay application lifecycle listeners independently with
 `--fault startup-event-delay --startup-event dom-content-loaded --pattern "**/checkout"`.
 The fault supports `dom-content-loaded` and `load`, injects a temporary same-origin bootstrap into
@@ -284,8 +287,8 @@ or the event loop.
 Probe missed main-thread deadlines with
 `--fault event-loop-stall --max-stall-ms 500 --stall-after-ms 0 --pattern "**/checkout"`.
 The offset is measured from the native `DOMContentLoaded` event and the stall duration is bounded
-at two seconds. Discovery finds the minimum observed duration, confirms it with repeated trials,
-and saves a stability-margin reproducer. The fault blocks only the matching page's main thread;
+at two seconds. Discovery confirms the configured duration with matched pairs and saves it as the
+reproducer. The fault blocks only the matching page's main thread;
 it does not simulate system-wide CPU saturation.
 Test expired session handling without recording credentials with
 `--fault auth-cookie-expiry --cookie-name session-id --pattern "**/api/session"`.
@@ -296,7 +299,7 @@ Test partially initialized browser state with
 `--fault storage-state-delay --storage local-storage --storage-key auth-token --max-delay 500`
 and a document URL pattern. The bootstrap temporarily makes `getItem` return `null` only for that
 key; it does not delete or record the stored value. Both local and session storage are supported,
-and discovery minimizes the visibility delay before saving a stability-margin trigger.
+and discovery confirms the configured visibility delay before saving the trigger.
 Expose wall-clock assumptions with
 `--fault clock-jump --clock-offset-ms 3600000 --jump-after-ms 25 --pattern "**/app"`.
 The fault changes `Date` wall time after a deterministic offset while leaving `performance.now`,
@@ -318,12 +321,12 @@ visual fault is reversible, uses a paired control, and requires a matched docume
 accepts its causal evidence.
 Expose suite-level isolation bugs with
 `--fault worker-pressure --max-workers 4`. FlakeLab raises Playwright's supported worker limit,
-enables full parallel scheduling for the selected target, and saves the smallest worker count that
-reproduces the failure. Probe shared accounts, records, ports, and other cross-test state with
+enables full parallel scheduling for the selected target, and confirms the configured worker count.
+Probe shared accounts, records, ports, and other cross-test state with
 `--fault shared-state-interference --max-copies 4`; this overlaps repeated copies of the selected
 test through Playwright's supported `repeatEach` and worker controls. Both faults use matched-seed
-single-worker controls, are bounded to 16 workers or copies, require an independent 12-trial
-confirmation, and store the selected test path-not a URL glob-as their artifact target.
+single-worker controls, are bounded to 16 workers or copies, and use the same sequential 4/6/8-pair
+causal gate. They store the selected test path-not a URL glob-as their artifact target.
 The local proxy and generated Playwright config are removed after every trial, including failed and
 interrupted tests. Solari repair proof consumes the same validated fault set as local replay.
 Revision bisect still rejects unsupported fault combinations explicitly rather than approximating

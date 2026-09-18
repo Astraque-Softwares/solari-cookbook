@@ -3,6 +3,16 @@ import type { Fault, TrialOutcome, TrialPlan } from "../domain/schema.js"
 import type { TrialExecutor } from "../runner/playwright-executor.js"
 
 const WILSON_Z_80 = 1.281_551_565_545
+const SEQUENTIAL_LOOKS = [4, 6, 8] as const
+const PRACTICAL_TREATMENT_RATE = 0.75
+const MAXIMUM_CONTROL_RATE = 0.25
+const MINIMUM_SIGNATURE_SHARE = 0.8
+const FISHER_ALPHA = 0.05
+const CONFIRM_THRESHOLD = {
+  4: [4, null, null, null, null],
+  6: [5, 5, null, null, null, null, null],
+  8: [6, 6, 7, null, null, null, null, null, null],
+} as const
 
 export interface ExperimentOptions {
   concurrency: number
@@ -50,6 +60,13 @@ export interface ExperimentResult {
     status: "failed" | "passed"
     trialId: string
   }>
+  sequentialDecision?: {
+    method: "fisher-exact-one-sided"
+    pairs: number
+    pValue: number | null
+    signatureShare: number
+    verdict: "confirmed" | "continue" | "inconclusive" | "rejected"
+  }
   trials: number
   upperBound80: number
 }
@@ -141,6 +158,11 @@ async function executePlans(
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, plans.length) }, worker))
+  if (completed.size !== plans.length) {
+    const error = new Error("Causal experiment was interrupted before its batch completed")
+    error.name = "AbortError"
+    throw error
+  }
   return [...completed.entries()]
     .sort((left, right) => left[0] - right[0])
     .map((entry) => entry[1])
@@ -231,6 +253,178 @@ function causalTreatment(
   }
 }
 
+function combination(total: number, selected: number): number {
+  if (selected < 0 || selected > total) return 0
+  const count = Math.min(selected, total - selected)
+  let result = 1
+  for (let index = 1; index <= count; index += 1) {
+    result = result * (total - count + index) / index
+  }
+  return result
+}
+
+export function fisherExactOneSided(
+  treatmentFailures: number,
+  treatmentTrials: number,
+  controlFailures: number,
+  controlTrials: number,
+): number {
+  const failures = treatmentFailures + controlFailures
+  const total = treatmentTrials + controlTrials
+  const denominator = combination(total, failures)
+  let probability = 0
+  const maximum = Math.min(treatmentTrials, failures)
+  for (let candidate = treatmentFailures; candidate <= maximum; candidate += 1) {
+    probability += combination(treatmentTrials, candidate)
+      * combination(controlTrials, failures - candidate)
+      / denominator
+  }
+  return Math.min(1, probability)
+}
+
+interface SequentialVerdict {
+  method: "fisher-exact-one-sided"
+  pairs: number
+  pValue: number | null
+  signatureShare: number
+  verdict: "confirmed" | "continue" | "inconclusive" | "rejected"
+}
+
+interface SequentialEvidence {
+  controlSignatureFailures: number
+  minimumTreatmentRate: number
+  pValue: number | null
+  signatureFailures: number
+  signatureShare: number
+}
+
+export function sequentialConfirmationThreshold(
+  pairs: number,
+  controlSignatureFailures: number,
+): number | null {
+  if (pairs === 4) return CONFIRM_THRESHOLD[4][controlSignatureFailures] ?? null
+  if (pairs === 6) return CONFIRM_THRESHOLD[6][controlSignatureFailures] ?? null
+  if (pairs === 8) return CONFIRM_THRESHOLD[8][controlSignatureFailures] ?? null
+  return null
+}
+
+function sequentialEvidence(
+  control: ExperimentResult,
+  treatment: ExperimentResult,
+  pairs: number,
+  minimumFailureRate: number,
+): SequentialEvidence {
+  const signature = treatment.failureSignatures[0]
+  const signatureFailures = signature?.failures ?? 0
+  const controlSignatureFailures = control.failureSignatures.find(
+    (entry) => entry.signature === signature?.signature,
+  )?.failures ?? 0
+  return {
+    controlSignatureFailures,
+    minimumTreatmentRate: Math.max(PRACTICAL_TREATMENT_RATE, minimumFailureRate),
+    pValue: signature
+      ? fisherExactOneSided(signatureFailures, pairs, controlSignatureFailures, pairs)
+      : null,
+    signatureFailures,
+    signatureShare: treatment.failed === 0 ? 0 : signatureFailures / treatment.failed,
+  }
+}
+
+function confirmsCausalSignal(
+  control: ExperimentResult,
+  treatment: ExperimentResult,
+  evidence: SequentialEvidence,
+): boolean {
+  const threshold = sequentialConfirmationThreshold(
+    treatment.trials,
+    evidence.controlSignatureFailures,
+  )
+  return threshold !== null
+    && evidence.signatureFailures >= threshold
+    && treatment.failureRate >= evidence.minimumTreatmentRate
+    && control.failureRate <= MAXIMUM_CONTROL_RATE
+    && evidence.signatureShare >= MINIMUM_SIGNATURE_SHARE
+    && (evidence.pValue ?? 1) <= FISHER_ALPHA
+}
+
+function verdictResult(
+  pairs: number,
+  evidence: SequentialEvidence,
+  verdict: SequentialVerdict["verdict"],
+): SequentialVerdict {
+  return {
+    method: "fisher-exact-one-sided",
+    pairs,
+    pValue: evidence.pValue,
+    signatureShare: evidence.signatureShare,
+    verdict,
+  }
+}
+
+function remainingConfirmationPossible(
+  control: ExperimentResult,
+  treatment: ExperimentResult,
+  signatureFailures: number,
+  pairs: number,
+  minimumTreatmentRate: number,
+): boolean {
+  const remaining = SEQUENTIAL_LOOKS.at(-1)! - pairs
+  const possibleTreatmentFailures = treatment.failed + remaining
+  const possibleSignatureFailures = signatureFailures + remaining
+  const possibleTrials = pairs + remaining
+  const possibleSignatureShare = possibleTreatmentFailures === 0
+    ? 0
+    : possibleSignatureFailures / possibleTreatmentFailures
+  return possibleTreatmentFailures / possibleTrials >= minimumTreatmentRate
+    && control.failed / possibleTrials <= MAXIMUM_CONTROL_RATE
+    && possibleSignatureShare >= MINIMUM_SIGNATURE_SHARE
+}
+
+function sequentialVerdict(
+  control: ExperimentResult,
+  treatment: ExperimentResult,
+  pairs: number,
+  minimumFailureRate: number,
+): SequentialVerdict {
+  const evidence = sequentialEvidence(control, treatment, pairs, minimumFailureRate)
+  if (confirmsCausalSignal(control, treatment, evidence)) {
+    return verdictResult(pairs, evidence, "confirmed")
+  }
+  if (control.failureRate > MAXIMUM_CONTROL_RATE) {
+    return verdictResult(pairs, evidence, "rejected")
+  }
+  if (pairs === SEQUENTIAL_LOOKS.at(-1)) {
+    return verdictResult(pairs, evidence, "inconclusive")
+  }
+  const verdict = remainingConfirmationPossible(
+    control,
+    treatment,
+    evidence.signatureFailures,
+    pairs,
+    evidence.minimumTreatmentRate,
+  ) ? "continue" : "rejected"
+  return verdictResult(pairs, evidence, verdict)
+}
+
+function sequentialTreatment(
+  control: ExperimentResult,
+  treatment: ExperimentResult,
+  pairs: number,
+  minimumFailureRate: number,
+): ExperimentResult {
+  const decision = sequentialVerdict(control, treatment, pairs, minimumFailureRate)
+  const causal = causalTreatment(
+    control,
+    treatment,
+    Math.max(PRACTICAL_TREATMENT_RATE, minimumFailureRate),
+  )
+  return {
+    ...causal,
+    confirmed: decision.verdict === "confirmed",
+    sequentialDecision: decision,
+  }
+}
+
 export async function evaluateExperiment(
   execute: TrialExecutor,
   options: ExperimentOptions,
@@ -248,39 +442,58 @@ export async function evaluateExperiment(
   )
 }
 
+function causalPairPlans(
+  options: ExperimentOptions,
+  batch: number,
+  startPair: number,
+  pairCount: number,
+): TrialPlan[] {
+  return Array.from({ length: pairCount }, (_, offset) => {
+    const pair = startPair + offset
+    const seed = deriveTrialSeed(options.seed, batch * 100 + pair)
+    const planIndex = batch * 1_000 + pair * 2
+    const control: TrialPlan = {
+      faults: [],
+      index: planIndex,
+      seed,
+      trialId: `confirm-${batch}-pair-${pair + 1}-control`,
+    }
+    const treatment: TrialPlan = {
+      faults: [...options.faults],
+      index: planIndex + 1,
+      seed,
+      trialId: `confirm-${batch}-pair-${pair + 1}-intervention`,
+    }
+    return pair % 2 === 0 ? [control, treatment] : [treatment, control]
+  }).flat()
+}
+
 async function evaluateCausalExperiment(
   execute: TrialExecutor,
   options: ExperimentOptions,
   batch: number,
 ): Promise<{ control: ExperimentResult; treatment: ExperimentResult }> {
   validateOptions(options)
-  const scheduled = Array.from({ length: options.trials }, (_, index) => {
-    const seed = deriveTrialSeed(options.seed, index)
-    const planIndex = batch * 1_000 + index * 2
-    const control: TrialPlan = {
-      faults: [],
-      index: planIndex,
-      seed,
-      trialId: `batch-${batch}-control-${index + 1}`,
+  const completed: CompletedTrial[] = []
+  let pairs = 0
+  for (const look of SEQUENTIAL_LOOKS) {
+    const plans = causalPairPlans(options, batch, pairs, look - pairs)
+    completed.push(...await executePlans(execute, plans, options.concurrency, options.signal))
+    pairs = look
+    const control = summarize(
+      completed.filter((entry) => entry.plan.faults.length === 0),
+      options.minimumFailureRate,
+    )
+    const treatment = summarize(
+      completed.filter((entry) => entry.plan.faults.length > 0),
+      options.minimumFailureRate,
+    )
+    const evaluated = sequentialTreatment(control, treatment, pairs, options.minimumFailureRate)
+    if (evaluated.sequentialDecision?.verdict !== "continue") {
+      return { control, treatment: evaluated }
     }
-    const treatment: TrialPlan = {
-      faults: [...options.faults],
-      index: planIndex + 1,
-      seed,
-      trialId: `batch-${batch}-intervention-${index + 1}`,
-    }
-    return index % 2 === 0 ? [control, treatment] : [treatment, control]
-  }).flat()
-  const completed = await executePlans(execute, scheduled, options.concurrency, options.signal)
-  const control = summarize(
-    completed.filter((entry) => entry.plan.faults.length === 0),
-    options.minimumFailureRate,
-  )
-  const treatment = summarize(
-    completed.filter((entry) => entry.plan.faults.length > 0),
-    options.minimumFailureRate,
-  )
-  return { control, treatment: causalTreatment(control, treatment, options.minimumFailureRate) }
+  }
+  throw new Error("Sequential causal confirmation ended without a decision")
 }
 
 export function createCausalEvaluator(

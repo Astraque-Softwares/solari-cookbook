@@ -1,6 +1,6 @@
 {
   "name": "flakelab",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Find, reproduce, and prove fixes for flaky Playwright tests.",
   "type": "module",
   "license": "MIT",

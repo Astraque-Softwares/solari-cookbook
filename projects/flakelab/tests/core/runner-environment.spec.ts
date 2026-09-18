@@ -39,7 +39,7 @@ test("runner controls are bounded and contain no unrelated browser metadata", ()
   })
 })
 
-test("runner discovery minimizes pressure and independently confirms it", async () => {
+test("runner discovery confirms the robust configured pressure", async () => {
   const execute: TrialExecutor = (trial) => {
     const fault = trial.faults[0]
     const fails = fault?.kind === "worker-pressure"
@@ -58,9 +58,9 @@ test("runner discovery minimizes pressure and independently confirms it", async 
     maximumCopies: 4,
   })
 
-  expect(workers.trigger).toMatchObject({ kind: "worker-pressure", workers: 3 })
-  expect(shared.trigger).toMatchObject({ kind: "shared-state-interference", copies: 2 })
-  expect([workers.triggerResult.trials, shared.triggerResult.trials]).toEqual([12, 12])
+  expect(workers.trigger).toMatchObject({ kind: "worker-pressure", workers: 4 })
+  expect(shared.trigger).toMatchObject({ kind: "shared-state-interference", copies: 4 })
+  expect([workers.triggerResult.trials, shared.triggerResult.trials]).toEqual([4, 4])
 })
 
 test("project runner exposes worker and repeated shared-state collisions", async () => {

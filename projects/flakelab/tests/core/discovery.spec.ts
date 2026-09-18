@@ -79,15 +79,16 @@ test("causal discovery can amplify an existing matching failure signature", asyn
     trials: 4,
   })
 
-  expect(result.baseline.failureRate).toBe(0.25)
-  expect(result.trigger.delayMs).toBe(1)
+  expect(result.baseline.failureRate).toBeCloseTo(1 / 6)
+  expect(result.trigger.delayMs).toBe(2)
   expect(result.triggerResult).toMatchObject({
     confirmed: true,
     causalEffect: {
-      controlFailures: 0,
+      controlFailures: 1,
       signature: "checkout-timeout",
-      treatmentFailures: 12,
+      treatmentFailures: 6,
     },
+    sequentialDecision: { pairs: 6, verdict: "confirmed" },
   })
 })
 
@@ -112,14 +113,14 @@ test("causal discovery interleaves paired controls and interventions", async () 
   })
 
   expect(trialIds.slice(0, 8)).toEqual([
-    "batch-1-control-1",
-    "batch-1-intervention-1",
-    "batch-1-intervention-2",
-    "batch-1-control-2",
-    "batch-1-control-3",
-    "batch-1-intervention-3",
-    "batch-1-intervention-4",
-    "batch-1-control-4",
+    "confirm-1-pair-1-control",
+    "confirm-1-pair-1-intervention",
+    "confirm-1-pair-2-intervention",
+    "confirm-1-pair-2-control",
+    "confirm-1-pair-3-control",
+    "confirm-1-pair-3-intervention",
+    "confirm-1-pair-4-intervention",
+    "confirm-1-pair-4-control",
   ])
 })
 
@@ -139,7 +140,7 @@ test("causal discovery rejects a matching failure rate in the control", async ()
   })).rejects.toThrow("Maximum network delay did not reproduce the failure confidently")
 })
 
-test("discovered reproducers retain the independent confirmation trial count", () => {
+test("discovered reproducers retain the causal confirmation trial count", () => {
   const reproducer = buildDiscoveredReproducer(
     "tests/startup.spec.ts",
     42,
@@ -175,7 +176,7 @@ test("discovered reproducers retain the independent confirmation trial count", (
   expect(reproducer.expectedFailure.signature).toBe("startup-deadline")
 })
 
-test("network delay discovery finds the smallest confirmed integer delay", async () => {
+test("network delay discovery ships the robust configured trigger", async () => {
   const result = await discoverNetworkDelay((trial) => {
     const delay = trial.faults.find((fault) => fault.kind === "network-delay")
     const delayMs = delay?.kind === "network-delay" ? delay.delayMs : 0
@@ -195,12 +196,13 @@ test("network delay discovery finds the smallest confirmed integer delay", async
     trials: 4,
   })
 
-  expect(result.trigger.delayMs).toBe(100)
+  expect(result.trigger.delayMs).toBe(250)
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
+  expect(result.experiments).toHaveLength(1)
 })
 
-test("network delay discovery rejects a boundary that does not confirm twice", async () => {
+test("network delay discovery does not spend executions on a fragile minimum", async () => {
   const attempts = new Map<number, number>()
   const result = await discoverNetworkDelay((trial) => {
     const delay = trial.faults.find((fault) => fault.kind === "network-delay")
@@ -224,11 +226,12 @@ test("network delay discovery rejects a boundary that does not confirm twice", a
     trials: 4,
   })
 
-  expect(result.trigger.delayMs).toBe(101)
+  expect(result.trigger.delayMs).toBe(250)
   expect(result.triggerResult.confirmed).toBe(true)
+  expect([...attempts.keys()].sort((left, right) => left - right)).toEqual([0, 250])
 })
 
-test("response truncation discovery finds the smallest confirmed byte removal", async () => {
+test("response truncation discovery ships the robust configured removal", async () => {
   const result = await discoverResponseTruncation((trial) => {
     const truncation = trial.faults.find((fault) => fault.kind === "response-truncation")
     const removeBytes = truncation?.kind === "response-truncation"
@@ -250,12 +253,12 @@ test("response truncation discovery finds the smallest confirmed byte removal", 
     trials: 4,
   })
 
-  expect(result.trigger.removeBytes).toBe(7)
+  expect(result.trigger.removeBytes).toBe(64)
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
-test("response duplication discovery finds the smallest confirmed byte count", async () => {
+test("response duplication discovery ships the robust configured byte count", async () => {
   const result = await discoverResponseDuplication((trial) => {
     const duplication = trial.faults.find((fault) => fault.kind === "response-duplication")
     const duplicateBytes = duplication?.kind === "response-duplication"
@@ -277,12 +280,12 @@ test("response duplication discovery finds the smallest confirmed byte count", a
     trials: 4,
   })
 
-  expect(result.trigger.duplicateBytes).toBe(7)
+  expect(result.trigger.duplicateBytes).toBe(64)
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
-test("response reordering discovery finds the smallest confirmed hold", async () => {
+test("response reordering discovery ships the robust configured hold", async () => {
   const result = await discoverResponseReordering((trial) => {
     const reordering = trial.faults.find((fault) => fault.kind === "response-reordering")
     const holdMs = reordering?.kind === "response-reordering" ? reordering.holdMs : 0
@@ -302,12 +305,12 @@ test("response reordering discovery finds the smallest confirmed hold", async ()
     trials: 4,
   })
 
-  expect(result.trigger.holdMs).toBe(30)
+  expect(result.trigger.holdMs).toBe(100)
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
-test("resource loading discovery finds the smallest script delay", async () => {
+test("resource loading discovery ships the robust configured script delay", async () => {
   const result = await discoverResourceLoadingDelay((trial) => {
     const resourceDelay = trial.faults.find((fault) => fault.kind === "resource-loading-delay")
     const delayMs = resourceDelay?.kind === "resource-loading-delay" ? resourceDelay.delayMs : 0
@@ -328,13 +331,13 @@ test("resource loading discovery finds the smallest script delay", async () => {
     trials: 4,
   })
 
-  expect(result.minimumDelayMs).toBe(75)
-  expect(result.trigger).toMatchObject({ delayMs: 113, resourceType: "script" })
+  expect(result.minimumDelayMs).toBe(150)
+  expect(result.trigger).toMatchObject({ delayMs: 150, resourceType: "script" })
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
-test("startup event discovery finds the edge and saves a stable trigger", async () => {
+test("startup event discovery ships the robust configured trigger", async () => {
   const result = await discoverStartupEventDelay((trial) => {
     const startupDelay = trial.faults.find((fault) => fault.kind === "startup-event-delay")
     const delayMs = startupDelay?.kind === "startup-event-delay" ? startupDelay.delayMs : 0
@@ -355,16 +358,16 @@ test("startup event discovery finds the edge and saves a stable trigger", async 
     trials: 4,
   })
 
-  expect(result.minimumDelayMs).toBe(75)
+  expect(result.minimumDelayMs).toBe(150)
   expect(result.trigger).toMatchObject({
-    delayMs: 113,
+    delayMs: 150,
     event: "dom-content-loaded",
   })
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
-test("event-loop discovery minimizes duration and saves a stable stall", async () => {
+test("event-loop discovery ships the robust configured stall", async () => {
   const result = await discoverEventLoopStall((trial) => {
     const stall = trial.faults.find((fault) => fault.kind === "event-loop-stall")
     const durationMs = stall?.kind === "event-loop-stall" ? stall.durationMs : 0
@@ -385,10 +388,10 @@ test("event-loop discovery minimizes duration and saves a stable stall", async (
     trials: 4,
   })
 
-  expect(result.minimumDurationMs).toBe(150)
-  expect(result.trigger).toMatchObject({ durationMs: 225, startAfterMs: 0 })
+  expect(result.minimumDurationMs).toBe(300)
+  expect(result.trigger).toMatchObject({ durationMs: 300, startAfterMs: 0 })
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
 test("auth-cookie discovery confirms a value-free expired-session trigger", async () => {
@@ -415,10 +418,10 @@ test("auth-cookie discovery confirms a value-free expired-session trigger", asyn
     pattern: "**/api/session",
   })
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
-test("storage-state discovery finds the visibility boundary and saves a stable trigger", async () => {
+test("storage-state discovery ships the robust configured trigger", async () => {
   const result = await discoverStorageStateDelay((trial) => {
     const delay = trial.faults.find((fault) => fault.kind === "storage-state-delay")
     const delayMs = delay?.kind === "storage-state-delay" ? delay.delayMs : 0
@@ -440,14 +443,14 @@ test("storage-state discovery finds the visibility boundary and saves a stable t
     trials: 4,
   })
 
-  expect(result.minimumDelayMs).toBe(100)
+  expect(result.minimumDelayMs).toBe(250)
   expect(result.trigger).toMatchObject({
-    delayMs: 175,
+    delayMs: 250,
     key: "auth-token",
     storage: "local-storage",
   })
   expect(result.triggerResult.confirmed).toBe(true)
-  expect(result.triggerResult.trials).toBe(12)
+  expect(result.triggerResult.trials).toBe(4)
 })
 
 test("combination minimization removes irrelevant conditions", async () => {

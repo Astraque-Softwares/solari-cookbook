@@ -1,15 +1,15 @@
 ---
 title: discover
-description: Search one fault family for the smallest deterministic trigger, then confirm it.
+description: Screen one fault family and confirm a robust causal trigger.
 ---
 
 ```bash
 flakelab discover <test> [options]
 ```
 
-Runs matched-seed control and intervention trials, minimizes the fault boundary,
-independently confirms the result, and writes a strict YAML reproducer plus a JSON discovery
-sidecar.
+Runs matched-seed control and intervention trials through the same proxy path, evaluates a
+sequential causal gate after 4, 6, and at most 8 pairs, and writes a strict YAML reproducer plus a
+JSON discovery sidecar.
 
 ## Core options
 
@@ -17,11 +17,11 @@ sidecar.
 | --- | --- | --- |
 | `--fault <family>` | `network-delay` | Fault family to search. |
 | `--pattern <glob>` | `**/api/checkout` | Request or document pattern for applicable faults. |
-| `--trials <number>` | `4` | Trials per candidate batch. |
+| `--trials <number>` | `4` | Compatibility setting for experiment batches; causal confirmation uses 4/6/8 matched pairs. |
 | `--concurrency <n>` | `2` | Playwright workers per trial batch. Use `1` for suites with unsafe shared state. |
 | `--min-rate <rate>` | `0.7` | Requested intervention failure rate, greater than 0 and at most 1. |
 | `--seed <number>` | `1` | Deterministic seed. |
-| `--max-seconds <n>` | `600` | Elapsed-time ceiling for discovery. |
+| `--max-seconds <n>` | `600` | Elapsed-time ceiling; discovery also has a hard 28-execution ceiling. |
 | `--output <path>` | `flakelab.repro.yaml` | Reproducer path. |
 
 Fault-specific bounds are listed in the [fault catalog](/docs/faults).
@@ -33,9 +33,9 @@ outcome, the trial duration, the pass/fail split, and how much of the time budge
 Standard output stays reserved for the JSON result.
 
 ```text
-› discovery · network-delay · bounded to 10m 0s · stable triggers receive a 12-trial confirmation
-  · trial 1 · passed · 4.2s · 1 passed / 0 failed · 4.2s of 5m 0s
-  · trial 2 · failed · 5.4s · 1 passed / 1 failed · 9.6s of 5m 0s
+› discovery · network-delay · bounded to 10m 0s and 28 executions · causal looks at 4/6/8 matched pairs
+  · trial 1 · control · no-op proxy · passed · 4.2s · 1 passed / 0 failed
+  · trial 2 · intervention · network-delay=250ms · failed · checkout-timeout · 5.4s
 ```
 
 ## Examples
@@ -53,6 +53,6 @@ flakelab discover tests/payload.spec.ts \
 
 <Callout type="warn">
 If the control arm is itself noisy, discovery may end without a confident trigger. That is a
-deliberate refusal to overclaim, not a bug - raise `--trials`, tighten the target, or pick a
-fault family that matches the suspected mechanism.
+deliberate refusal to overclaim, not a bug - tighten the target or pick a fault family that matches
+the suspected mechanism.
 </Callout>

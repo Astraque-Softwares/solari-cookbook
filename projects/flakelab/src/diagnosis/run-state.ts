@@ -153,6 +153,7 @@ export function createDiagnosisContext(options: {
   const recommendation = buildDiagnosisRecommendation({
     elapsedMilliseconds: options.observation.elapsedMilliseconds,
     observedExecutions: options.observation.executions,
+    observedFailures: options.observation.failures,
     observedRuns: options.paths.scan ? Number(options.values.runs) : 0,
     selectedTestCount: options.observation.tests,
     stage: "observed",
@@ -256,6 +257,7 @@ export async function saveDiagnosis(
   const recommendation = buildDiagnosisRecommendation({
     elapsedMilliseconds: checkpoint.observation.elapsedMilliseconds,
     observedExecutions: checkpoint.observation.executions,
+    observedFailures: checkpoint.observation.failures,
     observedRuns: checkpoint.artifacts.scan ? Number(values.runs) : 0,
     selectedTestCount: checkpoint.observation.tests,
     stage,

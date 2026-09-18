@@ -132,3 +132,31 @@ test("automatic discovery does not misclassify runner errors as a clean screen",
 
   await expect(result).rejects.toThrow("Automatic fault screening encountered runner errors")
 })
+
+test("automatic discovery records an irrelevant runner error and continues to a signal", async () => {
+  let executions = 0
+  const result = await selectAutomaticFault((trial) => {
+    executions += 1
+    const fault = trial.faults[0]
+    if (fault?.kind === "network-delay") {
+      return Promise.resolve({
+        durationMs: 1,
+        errorReason: "route was unavailable",
+        exitCode: 1,
+        status: "error" as const,
+      })
+    }
+    const failed = fault?.kind === "response-truncation"
+    return Promise.resolve({
+      durationMs: 1,
+      exitCode: failed ? 1 : 0,
+      ...(failed ? { failureSignature: "partial-data" } : {}),
+      status: failed ? "failed" as const : "passed" as const,
+    })
+  }, automaticOptions)
+
+  expect(result.fault.kind).toBe("response-truncation")
+  expect(result.screenings.find((entry) => entry.fault.kind === "network-delay"))
+    .toMatchObject({ errors: 1, trials: 1 })
+  expect(executions).toBe(2)
+})

@@ -147,6 +147,23 @@ test("runner injects request faults into ordinary Playwright tests", async () =>
   expect(baselineAfter.status).toBe("passed")
 })
 
+test("discovery controls traverse a no-op proxy without changing the outcome", async () => {
+  test.slow()
+  const execute = createPlaywrightExecutor(
+    process.cwd(),
+    "tests/fixtures/checkout-regression.spec.ts",
+    { proxyMode: "always" },
+  )
+  const outcome = await execute({
+    faults: [],
+    index: 0,
+    seed: 7,
+    trialId: "no-op-proxy-control",
+  })
+
+  expect(outcome).toMatchObject({ status: "passed" })
+})
+
 test("runner injects response and loading faults into ordinary Playwright tests", async () => {
   test.slow()
   const projectRoot = process.cwd()

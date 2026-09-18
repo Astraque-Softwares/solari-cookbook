@@ -151,9 +151,14 @@ async function runDiscoveryStage(context: DiagnosisContext): Promise<DiagnosisSt
     return "no-signal-observed"
   }
   context.checkpoint.artifacts.reproducer = portableProjectPath(projectRoot, values.reproducer)
+  const screeningExecutions = result.automaticScreening?.reduce(
+    (total, screening) => total + screening.trials,
+    0,
+  ) ?? 0
   addDiagnosisUsage(context, {
     elapsedMilliseconds: Date.now() - startedAt,
-    executions: result.baseline.trials
+    executions: screeningExecutions
+      + result.baseline.trials
       + result.experiments.reduce(
         (total, experiment) => total + (
           "trials" in experiment ? experiment.trials : experiment.result.trials

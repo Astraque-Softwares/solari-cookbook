@@ -6,8 +6,6 @@ import type { TrialExecutor } from "../runner/playwright-executor.js"
 import type { ExperimentResult } from "./evaluate.js"
 import { createCausalEvaluator } from "./evaluate.js"
 
-const MINIMUM_CONFIRMATION_TRIALS = 12
-
 interface RunnerDiscoveryOptions {
   concurrency: number
   minimumFailureRate: number
@@ -32,7 +30,7 @@ export interface RunnerDiscoveryResult<T extends WorkerPressureFault | SharedSta
   triggerResult: ExperimentResult
 }
 
-interface MinimumSearchOptions<T extends WorkerPressureFault | SharedStateInterferenceFault> {
+interface RunnerSearchOptions<T extends WorkerPressureFault | SharedStateInterferenceFault> {
   buildFault: (value: number) => T
   execute: TrialExecutor
   label: string
@@ -46,8 +44,8 @@ function validateMaximum(value: number, label: string): void {
   }
 }
 
-async function discoverMinimum<T extends WorkerPressureFault | SharedStateInterferenceFault>(
-  search: MinimumSearchOptions<T>,
+async function discoverRobustMaximum<T extends WorkerPressureFault | SharedStateInterferenceFault>(
+  search: RunnerSearchOptions<T>,
 ): Promise<RunnerDiscoveryResult<T>> {
   const common = {
     concurrency: search.options.concurrency,
@@ -60,26 +58,11 @@ async function discoverMinimum<T extends WorkerPressureFault | SharedStateInterf
     trials: search.options.trials,
   })
   const experiments: ExperimentResult[] = []
-  let trigger: T | undefined
-  for (let value = 2; value <= search.maximum; value += 1) {
-    const candidate = search.buildFault(value)
-    const result = await evaluator.evaluate([candidate])
-    experiments.push(result)
-    if (result.confirmed) {
-      trigger = candidate
-      break
-    }
-  }
-  if (!trigger) {
-    throw new Error(`${search.label} did not reproduce the failure confidently`)
-  }
-  const triggerResult = await evaluator.evaluate(
-    [trigger],
-    Math.max(search.options.trials, MINIMUM_CONFIRMATION_TRIALS),
-  )
+  const trigger = search.buildFault(search.maximum)
+  const triggerResult = await evaluator.evaluate([trigger])
   experiments.push(triggerResult)
   if (!triggerResult.confirmed) {
-    throw new Error(`${search.label} did not reproduce in an independent confirmation batch`)
+    throw new Error(`${search.label} did not reproduce the failure confidently`)
   }
   return { baseline: evaluator.baseline(), experiments, trigger, triggerResult }
 }
@@ -89,7 +72,7 @@ export function discoverWorkerPressure(
   options: WorkerPressureDiscoveryOptions,
 ): Promise<RunnerDiscoveryResult<WorkerPressureFault>> {
   validateMaximum(options.maximumWorkers, "max-workers")
-  return discoverMinimum({
+  return discoverRobustMaximum({
     buildFault: (workers) => ({
       kind: "worker-pressure",
       pattern: options.pattern,
@@ -107,7 +90,7 @@ export function discoverSharedStateInterference(
   options: SharedStateDiscoveryOptions,
 ): Promise<RunnerDiscoveryResult<SharedStateInterferenceFault>> {
   validateMaximum(options.maximumCopies, "max-copies")
-  return discoverMinimum({
+  return discoverRobustMaximum({
     buildFault: (copies) => ({
       copies,
       kind: "shared-state-interference",

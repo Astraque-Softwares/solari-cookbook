@@ -15,26 +15,20 @@ Diagnosis explains observed evidence *before* proposing cloud or AI work, and re
 next experiment with a bounded trial count, expected duration, required credentials, and an
 estimated cost - or a clear statement that no estimate is available.
 
-After an eligible interactive diagnosis, FlakeLab always asks:
+After an eligible interactive diagnosis with a clean bounded scan, FlakeLab first asks:
 
 ```text
-Use Solari to prove a candidate fix? [y/N]
+Search locally for a causal trigger now? [Y/n]
 ```
 
-The default is no. Answering yes starts the bounded proof handoff and asks for an approved
-application source file when `--source` was not supplied, but AI candidate generation receives
-its own `[y/N]` consent prompt first. It follows local imports from the selected test file - or
-from tests discovered under a selected directory - and presents likely sources for explicit
-approval. Multiple matches are numbered and support Tab completion while typing. There is no
-unsafe source default: pressing Enter cancels instead of approving the test file. FlakeLab also
-compares its measured discovery estimate with
-`--max-seconds`; the displayed duration is a conservative ceiling of at least 10 minutes, or a
-larger calculated limit with 100% headroom rounded to the next minute. It is not presented as a
-prediction from the faster control scan. This accounts for fault injection, browser startup
-variance, and the final independent confirmation batch. After approval, FlakeLab checks
-`GROQ_API_KEY` and `SOLARI_API_KEY` before
-lengthy discovery begins. Missing keys can be pasted through hidden, run-once prompts. The
-prompts are skipped in CI and whenever stdin or stderr is not attached to a terminal, so
+Local discovery is provider-free. It screens one applicable fault family at a time and uses at
+most 28 executions. Only after a trigger passes the matched 4/6/8-pair causal gate does FlakeLab
+ask separately whether to use Solari and AI. It then asks for an approved application source file
+when `--source` was not supplied. Source ranking follows local imports and repository structure;
+multiple matches are numbered and support Tab completion. There is no unsafe source default:
+pressing Enter cancels. FlakeLab checks `GROQ_API_KEY` and `SOLARI_API_KEY` only after those
+approvals and before provider work. Missing keys can be pasted through hidden, run-once prompts.
+Prompts are skipped in CI and whenever stdin or stderr is not attached to a terminal, so
 automation cannot hang.
 
 ## Options
@@ -44,7 +38,7 @@ automation cannot hang.
 | `--report <blob-report>` | none | Start from existing CI evidence. |
 | `--baseline <artifact>` | none | Compare report analysis with earlier evidence. |
 | `--runs <number>` | `4` | Repetitions in the control scan. |
-| `--discover` | off | Run local paired controls and minimize a trigger. |
+| `--discover` | off | Screen locally and confirm one causal trigger. |
 | `--investigate` | off | Explicitly enable bounded Groq investigation. |
 | `--repair` | off | Explicitly enable candidate generation and Solari proof. |
 | `--source <file>` | none | Approve an application source file; repeat up to seven times. |
@@ -80,7 +74,7 @@ flakelab diagnose tests/checkout.spec.ts
 # Start from CI evidence
 flakelab diagnose --report ./blob-report --baseline previous.json
 
-# Local control scan, then minimize a trigger
+# Local control scan, then confirm a trigger
 flakelab diagnose tests/checkout.spec.ts --discover
 ```
 

@@ -4,6 +4,7 @@ import { buildDiscoveryBudget } from "../diagnosis/discovery-budget.js"
 import type { DiagnosisContext } from "../diagnosis/run-state.js"
 import { updateDiagnosisWorkflow } from "../diagnosis/run-state.js"
 import {
+  requestLocalDiscoveryApproval,
   requestProofDiscoverySeconds,
   requestProofSources,
   requestProviderProofApproval,
@@ -23,7 +24,6 @@ type RestartDiagnosis = (
 
 async function continueApprovedProof(context: DiagnosisContext): Promise<void> {
   const { continueSavedDiagnosis } = await import("./diagnose.js")
-  await continueSavedDiagnosis(context)
   if (context.checkpoint.stage !== "reproducer-created") return
   const sources = await requestProofSources(context.values.source, {
     discoverSources: async () => sourceSuggestions(context),
@@ -77,6 +77,29 @@ async function sourceSuggestions(context: DiagnosisContext): Promise<{
   }))
 }
 
+async function runApprovedLocalDiscovery(context: DiagnosisContext): Promise<boolean> {
+  if (context.checkpoint.stage !== "observed") return true
+  if (!await requestLocalDiscoveryApproval()) return false
+  const maxSeconds = await requestProofDiscoverySeconds(discoveryBudget(context))
+  if (maxSeconds === null) return false
+  updateDiagnosisWorkflow(context, {
+    ...context.values,
+    discover: true,
+    investigate: false,
+    "max-seconds": String(maxSeconds),
+    repair: false,
+  })
+  const { continueSavedDiagnosis } = await import("./diagnose.js")
+  await continueSavedDiagnosis(context)
+  return true
+}
+
+async function runApprovedProviderProof(context: DiagnosisContext): Promise<void> {
+  if (context.checkpoint.stage !== "reproducer-created") return
+  if (!await requestProviderProofApproval()) return
+  await continueApprovedProof(context)
+}
+
 export async function offerSolariProof(
   context: DiagnosisContext,
   repositoryRestart: number,
@@ -84,6 +107,8 @@ export async function offerSolariProof(
 ): Promise<void> {
   const { target, values } = context
   if (!target || values.repair) return
+  if (context.checkpoint.stage === "observed"
+    && context.checkpoint.recommendation.command === null) return
   if (!context.repository) throw new Error("Diagnosis repository profile is missing")
   const stable = await verifyLocalRepository(
     context.repository,
@@ -91,18 +116,9 @@ export async function offerSolariProof(
     async () => restartDiagnosis(target, values, repositoryRestart + 1),
   )
   if (!stable) return
-  if (!await requestProviderProofApproval()) return
-  const maxSeconds = await requestProofDiscoverySeconds(discoveryBudget(context))
-  if (maxSeconds === null) return
-  updateDiagnosisWorkflow(context, {
-    ...values,
-    discover: true,
-    investigate: false,
-    "max-seconds": String(maxSeconds),
-    repair: false,
-  })
   try {
-    await continueApprovedProof(context)
+    if (!await runApprovedLocalDiscovery(context)) return
+    await runApprovedProviderProof(context)
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "Proof pipeline failed"
     const checkpoint = portableProjectPath(context.projectRoot, context.artifactPath)

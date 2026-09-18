@@ -46,6 +46,7 @@ interface ExecutorOptions {
   environment?: NodeJS.ProcessEnv
   onObservedRequests?: (requests: ObservedRequest[]) => void
   playwrightCliPath?: string
+  proxyMode?: "automatic" | "always"
   signal?: AbortSignal
 }
 
@@ -65,8 +66,9 @@ function fingerprint(value: string): string {
 async function optionalFaultProxy(
   faults: readonly Fault[],
   observer: ExecutorOptions["onObservedRequests"],
+  proxyMode: NonNullable<ExecutorOptions["proxyMode"]>,
 ): Promise<FaultProxy | undefined> {
-  if (faults.length === 0 && !observer) return undefined
+  if (proxyMode === "automatic" && faults.length === 0 && !observer) return undefined
   return startFaultProxy(faults)
 }
 
@@ -275,7 +277,11 @@ export function createPlaywrightExecutor(
     )
     let proxy: Awaited<ReturnType<typeof startFaultProxy>> | undefined
     try {
-      proxy = await optionalFaultProxy(browserFaults, options.onObservedRequests)
+      proxy = await optionalFaultProxy(
+        browserFaults,
+        options.onObservedRequests,
+        options.proxyMode ?? "automatic",
+      )
       const environment = {
         ...createTrialEnvironment(trial, { ...process.env, ...options.environment }),
         ...executionControls.environment,

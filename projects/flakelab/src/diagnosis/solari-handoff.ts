@@ -105,6 +105,14 @@ export async function requestProviderProofApproval(
   return accepted(await ask("Use AI to investigate and generate the candidate? [y/N] "))
 }
 
+export async function requestLocalDiscoveryApproval(
+  options: SolariHandoffOptions = {},
+): Promise<boolean> {
+  if (!interactive(options)) return false
+  const ask = options.ask ?? askInTerminal
+  return acceptedByDefault(await ask("Search locally for a causal trigger now? [Y/n] "))
+}
+
 export async function requestProofSources(
   approvedSources: string[],
   options: SolariHandoffOptions = {},

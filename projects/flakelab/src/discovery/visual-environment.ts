@@ -8,8 +8,6 @@ import type { TrialExecutor } from "../runner/playwright-executor.js"
 import type { ExperimentResult } from "./evaluate.js"
 import { createCausalEvaluator } from "./evaluate.js"
 
-const MINIMUM_CONFIRMATION_TRIALS = 12
-
 interface VisualDiscoveryOptions {
   concurrency: number
   minimumFailureRate: number
@@ -48,18 +46,11 @@ async function confirmVisualFault<T extends AnimationSpeedFault | ReducedMotionF
     signal: options.signal,
   }
   const evaluator = createCausalEvaluator(execute, { ...common, trials: options.trials })
-  const first = await evaluator.evaluate([trigger])
-  if (!first.confirmed) {
+  const triggerResult = await evaluator.evaluate([trigger])
+  if (!triggerResult.confirmed) {
     throw new Error(`${label} did not reproduce the failure confidently`)
   }
-  const triggerResult = await evaluator.evaluate(
-    [trigger],
-    Math.max(options.trials, MINIMUM_CONFIRMATION_TRIALS),
-  )
-  if (!triggerResult.confirmed) {
-    throw new Error(`${label} did not reproduce in an independent confirmation batch`)
-  }
-  return { baseline: evaluator.baseline(), experiments: [first, triggerResult], trigger, triggerResult }
+  return { baseline: evaluator.baseline(), experiments: [triggerResult], trigger, triggerResult }
 }
 
 export function discoverAnimationSpeed(

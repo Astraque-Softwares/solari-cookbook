@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 
 import {
+  requestLocalDiscoveryApproval,
   requestProofDiscoverySeconds,
   requestProofSources,
   requestProviderProofApproval,
@@ -65,7 +66,23 @@ test("Solari proof handoff defaults to no", async () => {
   )).resolves.toBeNull()
 })
 
-test("provider consent can precede local discovery without requesting sources", async () => {
+test("local discovery defaults to yes and can be declined without provider work", async () => {
+  const questions: string[] = []
+  await expect(requestLocalDiscoveryApproval({
+    ...interactive,
+    ask: (question) => {
+      questions.push(question)
+      return Promise.resolve("")
+    },
+  })).resolves.toBe(true)
+  await expect(requestLocalDiscoveryApproval({
+    ...interactive,
+    ask: () => Promise.resolve("n"),
+  })).resolves.toBe(false)
+  expect(questions).toEqual(["Search locally for a causal trigger now? [Y/n] "])
+})
+
+test("provider consent does not request sources", async () => {
   const questions: string[] = []
   const answers = ["y", "y"]
   await expect(requestProviderProofApproval({

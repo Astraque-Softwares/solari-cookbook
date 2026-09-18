@@ -229,23 +229,15 @@ export function automaticScreeningTrialBound(
 async function executeScreening(
   execute: TrialExecutor,
   plans: Array<{ candidateIndex: number; plan: TrialPlan }>,
-  concurrency: number,
   signal?: AbortSignal,
 ): Promise<ScreeningTrial[]> {
   const completed: ScreeningTrial[] = []
-  let nextIndex = 0
-  let stopScheduling = false
-  const worker = async (): Promise<void> => {
-    while (!signal?.aborted && !stopScheduling) {
-      const entry = plans[nextIndex]
-      nextIndex += 1
-      if (!entry) return
-      const outcome = await execute(entry.plan)
-      completed.push({ candidateIndex: entry.candidateIndex, outcome })
-      if (outcome.status !== "passed") stopScheduling = true
-    }
+  for (const entry of plans) {
+    if (signal?.aborted) break
+    const outcome = await execute(entry.plan)
+    completed.push({ candidateIndex: entry.candidateIndex, outcome })
+    if (outcome.status === "failed") break
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, plans.length) }, worker))
   if (signal?.aborted) {
     const error = new Error("Automatic fault screening was interrupted")
     error.name = "AbortError"
@@ -310,15 +302,15 @@ export async function selectAutomaticFault(
         trialId: `screen-${candidate.fault.kind}`,
       },
     }] : [])
-  const completed = await executeScreening(execute, planned, options.concurrency, options.signal)
+  const completed = await executeScreening(execute, planned, options.signal)
   const screenings = candidates.map((candidate, index) => outcomeSummary(
     candidate,
     completed.filter((entry) => entry.candidateIndex === index).map((entry) => entry.outcome),
   ))
-  const error = screeningError(screenings)
-  if (error) throw error
   const selected = screenings.find((entry) => entry.failed > 0)
   if (selected) return { fault: selected.fault, screenings }
+  const error = screeningError(screenings)
+  if (error) throw error
   const notRun = screenings.filter((entry) => entry.coverage === "not-run")
   if (notRun.length > 0) {
     throw new Error("Automatic fault screening ended before every applicable probe completed")

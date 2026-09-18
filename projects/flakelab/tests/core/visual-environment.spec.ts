@@ -36,7 +36,7 @@ test("visual discovery confirms each fault in an independent batch", async () =>
   expect(motion.trigger).toMatchObject({ kind: "reduced-motion" })
   expect(viewport.trigger).toMatchObject({ kind: "viewport", width: 375, height: 667 })
   expect([animation, motion, viewport].map((result) => result.triggerResult.trials))
-    .toEqual([12, 12, 12])
+    .toEqual([4, 4, 4])
 })
 
 test("browser context options preserve only native context controls", () => {

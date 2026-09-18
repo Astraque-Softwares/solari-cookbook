@@ -7,7 +7,7 @@ These are runner-level faults. They never pretend to be browser or network mutat
 
 ## `worker-pressure`
 
-Finds the smallest supported Playwright worker count that exposes a failure. This is the
+Tests the configured supported Playwright worker count for a causal failure. This is the
 right tool when a suite passes serially and fails in CI.
 
 ```bash
@@ -27,12 +27,12 @@ flakelab discover tests/account.spec.ts \
   --max-copies 5
 ```
 
-Discovery finds the minimum number of overlapping copies that triggers the collision.
+Discovery confirms the configured number of overlapping copies with matched controls.
 
 ## Bounds
 
-Worker and copy counts are bounded at 16, and each result receives an independent 12-trial
-confirmation before it is accepted.
+Worker and copy counts are bounded at 16, and each result uses the same sequential 4/6/8-pair
+causal gate before it is accepted.
 
 | Option | Applies to | Default |
 | --- | --- | --- |

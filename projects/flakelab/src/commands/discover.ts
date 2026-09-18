@@ -44,7 +44,6 @@ import {
 } from "../discovery/runner-environment.js"
 import {
   NoAutomaticFaultSignalError,
-  type AutomaticFaultScreening,
   type AutomaticScreeningCapabilities,
 } from "../discovery/automatic.js"
 import type { Fault } from "../domain/schema.js"
@@ -72,6 +71,10 @@ import { TrialProgress } from "../ui/trial-progress.js"
 import type { DiscoverOptions } from "./options.js"
 import { integerOption, positiveNumberOption, rateOption, withInterruption } from "./options.js"
 import { calibrateDiscovery } from "./discovery-calibration.js"
+import {
+  addDiscoveryContext,
+  type DiscoveryContextEvidence,
+} from "./discovery-context.js"
 import { automaticDiscoverySelection } from "./automatic-discovery-selection.js"
 import {
   discoveryPathFor,
@@ -83,6 +86,8 @@ import { buildDiscoveredReproducer } from "./discovery-reproducer.js"
 
 export { discoveryFailureDetail } from "./discovery-reporting.js"
 export { buildDiscoveredReproducer } from "./discovery-reproducer.js"
+
+const MAXIMUM_DISCOVERY_EXECUTIONS = 28
 
 type SpecificDiscoveryResult =
   | AuthCookieDiscoveryResult
@@ -100,9 +105,7 @@ type SpecificDiscoveryResult =
     kind: "shared-state-interference" | "worker-pressure"
   }>>
 
-export type DiscoveryResult = SpecificDiscoveryResult & {
-  automaticScreening?: AutomaticFaultScreening[]
-}
+export type DiscoveryResult = SpecificDiscoveryResult & DiscoveryContextEvidence
 
 export type DiscoveryOutcome = DiscoveryResult | NoSignalDiscoveryResult
 
@@ -126,7 +129,7 @@ async function runEnvironmentDiscovery(
   execute: TrialExecutor,
   values: DiscoverOptions,
   common: CommonDiscoveryOptions,
-): Promise<DiscoveryResult | undefined> {
+): Promise<SpecificDiscoveryResult | undefined> {
   if (values.fault === "animation-speed") {
     return discoverAnimationSpeed(execute, {
       ...common,
@@ -192,7 +195,7 @@ async function runRunnerDiscovery(
   selector: string,
   values: DiscoverOptions,
   common: CommonDiscoveryOptions,
-): Promise<DiscoveryResult | undefined> {
+): Promise<SpecificDiscoveryResult | undefined> {
   if (values.fault === "shared-state-interference") {
     return discoverSharedStateInterference(execute, {
       ...common,
@@ -268,9 +271,16 @@ function countedExecutor(
   executeTrial: TrialExecutor,
   progress: TrialProgress,
 ): TrialExecutor {
+  let scheduled = 0
   return async (trial) => {
+    if (scheduled >= MAXIMUM_DISCOVERY_EXECUTIONS) {
+      throw new Error(
+        `Discovery reached its ${MAXIMUM_DISCOVERY_EXECUTIONS}-execution safety ceiling`,
+      )
+    }
+    scheduled += 1
     const outcome = await executeTrial(trial)
-    progress.trial(outcome.status, outcome.durationMs)
+    progress.trial(trial, outcome)
     return outcome
   }
 }
@@ -298,6 +308,7 @@ async function runDiscovery(
     configPath: repository.playwright.configPath,
     environment: repositoryEnvironment(repository),
     playwrightCliPath: repository.playwright.cliPath,
+    proxyMode: "always",
     signal,
   })
   const execute = countedExecutor(executeTrial, progress)
@@ -316,14 +327,11 @@ async function runDiscovery(
   const activeCommon = automatic ? { ...common, pattern: automatic.fault.pattern } : common
   const runnerResult = await runRunnerDiscovery(execute, selector, activeValues, activeCommon)
   if (runnerResult) {
-    return { ...runnerResult, ...(automatic ? { automaticScreening: automatic.screenings } : {}) }
+    return addDiscoveryContext(runnerResult, automatic?.screenings, capabilities)
   }
   const environmentResult = await runEnvironmentDiscovery(execute, activeValues, activeCommon)
   if (environmentResult) {
-    return {
-      ...environmentResult,
-      ...(automatic ? { automaticScreening: automatic.screenings } : {}),
-    }
+    return addDiscoveryContext(environmentResult, automatic?.screenings, capabilities)
   }
   const result = await runRequestDiscovery(execute, activeValues, activeCommon)
   if (!result) {
@@ -331,19 +339,28 @@ async function runDiscovery(
       "fault must be animation-speed, auth-cookie-expiry, auto, clock-jump, event-loop-stall, locale, network-delay, reduced-motion, resource-loading-delay, response-duplication, response-reordering, response-truncation, shared-state-interference, startup-event-delay, storage-state-delay, timezone, viewport, or worker-pressure",
     )
   }
-  return { ...result, ...(automatic ? { automaticScreening: automatic.screenings } : {}) }
+  return addDiscoveryContext(result, automatic?.screenings, capabilities)
 }
 
 function describeTrigger(result: DiscoveryResult): string {
   const parts: string[] = [result.trigger.kind]
   if ("minimumDelayMs" in result) {
-    parts.push(`minimum delay ${result.minimumDelayMs} ms`)
+    parts.push(`confirmed delay ${result.minimumDelayMs} ms`)
   }
   if ("minimumDurationMs" in result) {
-    parts.push(`minimum duration ${result.minimumDurationMs} ms`)
+    parts.push(`confirmed duration ${result.minimumDurationMs} ms`)
   }
   const observed = result.triggerResult
   parts.push(`${observed.failed}/${observed.trials} failures confirmed`)
+  if (observed.sequentialDecision) {
+    const pValue = observed.sequentialDecision.pValue === null
+      ? "unavailable"
+      : observed.sequentialDecision.pValue.toFixed(4)
+    parts.push(
+      `look ${observed.sequentialDecision.pairs} pairs`,
+      `Fisher p=${pValue}`,
+    )
+  }
   return parts.join(" · ")
 }
 
@@ -445,7 +462,8 @@ export async function discover(
   const reporter = new ProgressReporter()
   reporter.start(
     `discovery · ${values.fault}`,
-    `bounded to ${formatSeconds(maxSeconds)} · stable triggers receive a 12-trial confirmation`,
+    `bounded to ${formatSeconds(maxSeconds)} and ${MAXIMUM_DISCOVERY_EXECUTIONS} executions`
+    + " · causal looks at 4/6/8 matched pairs",
   )
   const progress = new TrialProgress(reporter, maxSeconds)
   let result: DiscoveryResult

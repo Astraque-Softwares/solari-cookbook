@@ -50,7 +50,7 @@ test("adaptive recommendations keep the cheapest useful next step explicit", () 
   expect(local).toMatchObject({
     credentials: [],
     expectedDuration: "up to 2 minute(s)",
-    plannedTrials: 7,
+    plannedTrials: 23,
     solariCostEstimateUsd: 0,
   })
   expect(local.command).toContain("--discover")
@@ -66,9 +66,25 @@ test("adaptive recommendations keep the cheapest useful next step explicit", () 
   expect(mixed).toMatchObject({
     command: "flakelab diagnose \"tests/checkout.spec.ts\" --discover",
     credentials: [],
-    plannedTrials: 7,
+    plannedTrials: 23,
   })
   expect(mixed.rationale).toContain("amplifies the same signature")
+
+  const nativeFlake = buildDiagnosisRecommendation({
+    elapsedMilliseconds: 4_000,
+    observedExecutions: 4,
+    observedFailures: 2,
+    observedRuns: 4,
+    stage: "observed",
+    status: "mixed-outcomes",
+    target: "tests/checkout.spec.ts",
+    values: options(),
+  })
+  expect(nativeFlake).toMatchObject({
+    command: null,
+    plannedTrials: 0,
+  })
+  expect(nativeFlake.rationale).toContain("reproduces naturally")
 
   const investigate = buildDiagnosisRecommendation({
     elapsedMilliseconds: 0,

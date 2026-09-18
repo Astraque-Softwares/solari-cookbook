@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: Matched controls, failure signatures, Wilson bounds, minimization, and proof.
+description: Matched controls, failure signatures, sequential causal gates, and proof.
 ---
 
 These five ideas are what separate "it failed while a fault was applied" from "this fault
@@ -24,31 +24,32 @@ treated as one flake with a 50% rate.
 The signature is what discovery confirms, what `replay` verifies, and what the proof matrix
 compares before and after a patch.
 
-## Wilson confidence bounds
+## Sequential causal gate
 
-Small samples lie. FlakeLab reports 80% Wilson score intervals rather than raw ratios, and
-the acceptance gate is written in terms of those bounds.
+Small samples lie. FlakeLab evaluates matched control/intervention evidence after 4, 6, and at
+most 8 pairs. Acceptance requires a one-sided Fisher exact result at or below 0.05 plus practical
+effect checks.
 
 A trigger is accepted only when:
 
-- the same signature reaches the requested intervention failure rate;
-- the intervention's 80% Wilson **lower** bound exceeds the matched control's **upper**
-  bound;
+- the same signature reaches at least a 75% intervention failure rate, or a higher requested rate;
+- the matched control failure rate stays at or below 25%;
+- one signature accounts for at least 80% of intervention failures;
+- the one-sided Fisher exact p-value is at most 0.05;
 - the fault reports that it actually applied;
-- minimization and independent confirmation preserve the result.
+- every completed look contains whole matched pairs.
 
 A bounded run that sees no failure does not claim permanent stability. It reports an upper
-confidence bound for the unobserved failure rate - for example, four clean runs bound the
+Wilson intervals remain in evidence as descriptive uncertainty. A bounded run that sees no
+failure reports an upper confidence bound for the unobserved failure rate - for example, four clean runs bound the
 failure rate below roughly 29%, which is not the same as "stable".
 
-## Minimization
+## Robust triggers
 
-A fault that reproduces at 250 ms is a weak explanation. A fault that reproduces at 61 ms
-and stops reproducing at 60 ms is a boundary, and boundaries are diagnostic.
-
-Discovery searches for the smallest value that still changes the outcome, then saves a
-reproducer with a stability margin above that edge so replay stays reliable. The minimizer
-can also remove irrelevant faults from a composed set.
+Default discovery tests the configured robust fault value and saves it only after causal
+confirmation. It does not spend most of the budget hunting a one-unit threshold that may move
+between machines. The composed-fault utility can still remove irrelevant faults when an explicit
+multi-fault investigation calls for that operation.
 
 ## Proof
 
