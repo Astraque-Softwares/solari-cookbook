@@ -3,6 +3,10 @@ import { Tag } from "./indicators.js"
 import { Section, SpecList } from "./layout.js"
 
 const VERDICT_COPY = {
+  CANDIDATE_INVALID: {
+    headline: "CANDIDATE INVALID",
+    summary: "No candidate passed bounded local policy and validation; isolated proof did not begin.",
+  },
   FIX_PROVEN: {
     headline: "FIX PROVEN",
     summary: "The candidate patch was accepted by an independent proof run.",

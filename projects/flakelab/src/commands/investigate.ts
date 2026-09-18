@@ -35,6 +35,11 @@ import {
   withInterruption,
 } from "./options.js"
 
+export interface InvestigateRuntime {
+  beforeProviderRequest?: () => void
+  maxPlanAttempts?: number
+}
+
 function evidenceRequestPattern(
   requiredEvidence: RequiredExperimentEvidence | undefined,
 ): string | undefined {
@@ -88,6 +93,7 @@ export async function investigate(
   values: InvestigateOptions,
   requiredEvidence?: RequiredExperimentEvidence,
   repository?: RepositoryProfile,
+  runtime: InvestigateRuntime = {},
 ): Promise<InvestigationReport> {
   writeStderr(formatProviderBoundary({
     credentials: ["GROQ_API_KEY"],
@@ -123,6 +129,7 @@ export async function investigate(
   const progress = new ProgressReporter()
   progress.start("investigation", "planning and running causal experiments")
   const report = await withInterruption(async (signal) => runInvestigation({
+    beforeProviderRequest: runtime.beforeProviderRequest,
     concurrency: integerOption(values.concurrency, "concurrency"),
     execute: createPlaywrightExecutor(profile.executionRoot, selector, {
       artifactRoot: profile.artifactRoot,
@@ -135,6 +142,7 @@ export async function investigate(
     inputUsdPerMillion: QWEN_INPUT_USD_PER_MILLION,
     maxCostUsd: positiveNumberOption(values["max-cost"], "max-cost"),
     maxExperiments: integerOption(values["max-experiments"], "max-experiments"),
+    maxPlanAttempts: runtime.maxPlanAttempts,
     maximumDelayMs: integerOption(values["max-delay"], "max-delay"),
     maxSeconds: integerOption(values["max-seconds"], "max-seconds"),
     maxSteps: integerOption(values["max-steps"], "max-steps"),

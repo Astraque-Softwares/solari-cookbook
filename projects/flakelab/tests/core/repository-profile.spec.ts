@@ -12,7 +12,10 @@ import {
   writeRepositoryProfile,
 } from "../../src/project/profile.js"
 import type { RepositoryProfile } from "../../src/project/schema.js"
-import { preflightCandidate } from "../../src/repair/preflight.js"
+import {
+  newCandidateDiagnostics,
+  preflightCandidate,
+} from "../../src/repair/preflight.js"
 import { projectPlan } from "../../src/repair/project-plan.js"
 import { packageManager, workspaceRoot } from "../../src/repair/project.js"
 
@@ -166,4 +169,65 @@ test("a valid candidate passes disposable checks and Playwright listing", async 
       after: "status.textContent = 'Submitting'",
     }],
   })).resolves.toEqual({ lint: true, testListed: true, typecheck: true })
+})
+
+test("candidate preflight ignores unchanged baseline diagnostics", () => {
+  const baseline = {
+    diagnostic: "src/generated.ts(8,23): error TS2307: Cannot find module './generated.pegjs'",
+    passed: false,
+  }
+  const candidate = {
+    diagnostic: "src/generated.ts(8,23): error TS2307: Cannot find module './generated.pegjs'",
+    passed: false,
+  }
+
+  expect(newCandidateDiagnostics(baseline, candidate)).toEqual([])
+})
+
+test("candidate preflight identifies newly introduced diagnostics", () => {
+  const baseline = {
+    diagnostic: "src/generated.ts(8,23): error TS2307: Cannot find module './generated.pegjs'",
+    passed: false,
+  }
+  const candidate = {
+    diagnostic: [
+      baseline.diagnostic,
+      "src/checkout.ts(12,4): error TS2322: Type 'string' is not assignable to type 'number'",
+    ].join("\n"),
+    passed: false,
+  }
+
+  expect(newCandidateDiagnostics(baseline, candidate)).toEqual([
+    "src/checkout.ts(<line>,<column>): error TS2322: Type 'string' is not assignable to type 'number'",
+  ])
+})
+
+test("candidate preflight ignores volatile formatter progress", () => {
+  const baseline = {
+    diagnostic: [
+      "Checking formatting...",
+      "src/a.ts (12ms)",
+      "Format issues found in above 1 files. Run without `--check` to fix.",
+      "Finished in 140ms on 20 files using 8 threads.",
+    ].join("\n"),
+    passed: false,
+  }
+  const candidate = {
+    diagnostic: [
+      "Checking formatting...",
+      "src/a.ts (98.4ms)",
+      "Format issues found in above 1 files. Run without `--check` to fix.",
+      "Finished in 601.7ms on 20 files using 8 threads.",
+    ].join("\n"),
+    passed: false,
+  }
+
+  expect(newCandidateDiagnostics(baseline, candidate)).toEqual([])
+})
+
+test("candidate preflight rejects a silent check that starts failing", () => {
+  expect(newCandidateDiagnostics(
+    { diagnostic: "", passed: true },
+    { diagnostic: "src/a.ts (12ms)", passed: false },
+  )).toEqual(["check changed from passing to failing without a diagnostic"])
 })

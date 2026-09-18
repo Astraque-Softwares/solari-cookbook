@@ -260,6 +260,7 @@ function parseRepair(args: string[]): CliInvocation {
     allowPositionals: true,
     strict: true,
     options: {
+      artifacts: DEFINITIONS.artifacts,
       concurrency: { type: "string", default: "1" },
       "max-cost": DEFINITIONS.maxCost,
       "max-seconds": DEFINITIONS.maxSeconds,
@@ -275,6 +276,7 @@ function parseRepair(args: string[]): CliInvocation {
     command: "repair",
     target: oneTarget(parsed.positionals, "repair"),
     options: {
+      artifacts: required(parsed.values.artifacts, "artifacts"),
       concurrency: required(parsed.values.concurrency, "concurrency"),
       "max-cost": required(parsed.values["max-cost"], "max-cost"),
       "max-seconds": required(parsed.values["max-seconds"], "max-seconds"),

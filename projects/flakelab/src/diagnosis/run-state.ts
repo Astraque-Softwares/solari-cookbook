@@ -6,6 +6,7 @@ import type { DiagnoseOptions } from "../commands/options.js"
 import type { ScanArtifact, ScanStatus } from "../scan/schema.js"
 import { portableRepositoryProfile } from "../project/profile.js"
 import type { RepositoryProfile } from "../project/schema.js"
+import type { CandidateGenerationEvidence } from "../repair/schema.js"
 import {
   diagnosisInputHash,
   writeDiagnosisCheckpoint,
@@ -168,6 +169,7 @@ export function createDiagnosisContext(options: {
       reason: "No Solari operation has run in this diagnosis.",
       status: "not-used",
     },
+    candidateGeneration: null,
     cleanup: { liveResources: 0, status: "not-required" },
     createdAt,
     input,
@@ -245,6 +247,23 @@ export function addDiagnosisUsage(context: DiagnosisContext, usage: {
   if (usage.solariCostUsd !== undefined) {
     actual.solariCostUsd = usage.solariCostUsd
   }
+}
+
+export async function recordCandidateGenerationProgress(
+  context: DiagnosisContext,
+  evidence: CandidateGenerationEvidence,
+): Promise<void> {
+  const previous = context.checkpoint.candidateGeneration?.usage
+    ?? { estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 }
+  addDiagnosisUsage(context, {
+    aiEstimatedCostUsd: evidence.usage.estimatedCostUsd - previous.estimatedCostUsd,
+    aiInputTokens: evidence.usage.inputTokens - previous.inputTokens,
+    aiOutputTokens: evidence.usage.outputTokens - previous.outputTokens,
+    elapsedMilliseconds: 0,
+    executions: 0,
+  })
+  context.checkpoint.candidateGeneration = evidence
+  await saveDiagnosis(context, "investigated", "running")
 }
 
 export async function saveDiagnosis(

@@ -14,6 +14,7 @@ const STATUS_TONES: Record<DiagnosisArtifact["status"], StatusTone> = {
 }
 
 const STAGE_TONES: Record<DiagnosisStage, StatusTone> = {
+  "candidate-invalid": "failure",
   investigated: "success",
   "no-signal-observed": "success",
   observed: "success",

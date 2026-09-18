@@ -71,11 +71,13 @@ export async function collectInvestigationResults(
 }
 
 export interface InvestigatorOptions {
+  beforeProviderRequest?: () => void
   concurrency: number
   execute: TrialExecutor
   inputUsdPerMillion: number
   maxCostUsd: number
   maxExperiments: number
+  maxPlanAttempts?: number
   maximumDelayMs: number
   maxSeconds: number
   maxSteps: number
@@ -117,6 +119,11 @@ function enforceCostBudget(
     throw new Error(`Investigation cost $${cost.toFixed(4)} exceeded its configured budget`)
   }
   return cost
+}
+
+function prepareProviderRequest(options: InvestigatorOptions): number {
+  options.beforeProviderRequest?.()
+  return options.beforeProviderRequest ? 0 : 2
 }
 
 function planningPrompt(
@@ -327,12 +334,13 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
   const planResult = await generateValidInvestigationPlan({
     generate: async (prompt, temperature): Promise<PlanGeneration> => {
       try {
+        const maxRetries = prepareProviderRequest(options)
         const result = await generateText({
           model: options.model,
           output: Output.object({ schema: investigationPlanSchema }),
           prompt,
           maxOutputTokens: options.outputTokenLimit,
-          maxRetries: 2,
+          maxRetries,
           timeout: { totalMs: budget.remainingMs() },
           abortSignal: signal,
           temperature,
@@ -360,7 +368,7 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
       options.maximumDelayMs,
       options.requiredEvidence?.condition,
     ),
-    maxAttempts: Math.min(2, options.maxSteps - 1),
+    maxAttempts: Math.min(options.maxPlanAttempts ?? 2, options.maxSteps - 1),
     rules: {
       maxExperiments: options.maxExperiments,
       maximumDelayMs: options.maximumDelayMs,
@@ -406,12 +414,13 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
     temperature: number,
   ): Promise<AssessmentGeneration> => {
     try {
+      const maxRetries = prepareProviderRequest(options)
       const result = await generateText({
         model: options.model,
         output: Output.object({ schema: investigationAssessmentSchema }),
         prompt,
         maxOutputTokens: options.outputTokenLimit,
-        maxRetries: 2,
+        maxRetries,
         timeout: { totalMs: budget.remainingMs() },
         abortSignal: signal,
         temperature,

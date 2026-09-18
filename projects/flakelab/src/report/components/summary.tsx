@@ -20,7 +20,7 @@ export function EvidenceSummarySection({ report }: Readonly<{
   report: EvidenceReport
 }>): React.JSX.Element {
   const confirmed = report.hypotheses.filter((entry) => entry.status === "confirmed").length
-  const tokens = report.usage.inputTokens + report.usage.outputTokens
+  const tokens = report.usage.combined.inputTokens + report.usage.combined.outputTokens
   return <Section id="summary" ordinal="03" title="Evidence summary">
     <dl className="metrics">
       <Metric
@@ -30,9 +30,9 @@ export function EvidenceSummarySection({ report }: Readonly<{
       />
       <Metric detail="of the hypotheses" label="Confirmed causes" value={String(confirmed)} />
       <Metric
-        detail={`${tokens.toLocaleString("en-US")} tokens`}
         label="Model cost"
-        value={formatMoney(report.usage.estimatedCostUsd)}
+        detail={`${tokens.toLocaleString("en-US")} tokens · candidate ${formatMoney(report.usage.candidateGeneration.estimatedCostUsd)}`}
+        value={formatMoney(report.usage.combined.estimatedCostUsd)}
       />
       <Metric detail="proof environment" label="Execution" value={report.proof.execution} />
     </dl>

@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises"
-import { extname, relative, resolve } from "node:path"
+import { extname, isAbsolute, relative, resolve } from "node:path"
 
 import type { CandidatePatch } from "./schema.js"
 import { candidatePatchSchema } from "./schema.js"
+import { CandidateValidationError } from "./rejection.js"
 
 const ALLOWED_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".ts", ".tsx"])
 const FORBIDDEN_ADDITIONS = [
@@ -20,11 +21,18 @@ const PLAYWRIGHT_LOCATION = /(\.(?:js|jsx|mjs|ts|tsx)):\d+(?::\d+)?$/iu
 function normalizedRelativePath(projectRoot: string, requestedPath: string): string {
   const absolutePath = resolve(projectRoot, requestedPath.replace(PLAYWRIGHT_LOCATION, "$1"))
   const pathFromRoot = relative(projectRoot, absolutePath).replaceAll("\\", "/")
-  if (pathFromRoot.startsWith("..") || pathFromRoot.includes("node_modules")) {
-    throw new Error("Candidate edits must stay inside project source")
+  if (pathFromRoot === ".." || pathFromRoot.startsWith("../") || isAbsolute(pathFromRoot)
+    || pathFromRoot.split("/").includes("node_modules")) {
+    throw new CandidateValidationError(
+      "unsafe-path",
+      "Candidate edits must stay inside project source",
+    )
   }
   if (!ALLOWED_EXTENSIONS.has(extname(absolutePath).toLowerCase())) {
-    throw new Error("Candidate edits are limited to JavaScript and TypeScript source")
+    throw new CandidateValidationError(
+      "unsafe-path",
+      "Candidate edits are limited to JavaScript and TypeScript source",
+    )
   }
   return pathFromRoot
 }
@@ -55,37 +63,90 @@ function onlyRaisesNumericLimits(before: string, after: string): boolean {
     && afterNumbers.some((value, index) => value > beforeNumbers[index])
 }
 
-export async function validateCandidatePatch(
+function parseCandidate(value: CandidatePatch): CandidatePatch {
+  const parsed = candidatePatchSchema.safeParse(value)
+  if (parsed.success) return parsed.data
+  const sizeLimit = parsed.error.issues.some((issue) => issue.code === "too_big")
+  throw new CandidateValidationError(
+    sizeLimit ? "size-limit" : "schema-invalid",
+    sizeLimit
+      ? "Candidate exceeds the bounded patch size limit"
+      : "Candidate does not match the required patch schema",
+  )
+}
+
+export async function validateCandidateSafety(
   projectRoot: string,
   selectedTest: string,
   allowedSourcePaths: string[],
   value: CandidatePatch,
 ): Promise<CandidatePatch> {
-  const candidate = candidatePatchSchema.parse(value)
+  const candidate = parseCandidate(value)
   const normalizedTest = normalizedRelativePath(projectRoot, selectedTest)
   const allowed = new Set(allowedSourcePaths.map((path) => normalizedRelativePath(projectRoot, path)))
   const normalizedEdits: CandidatePatch["edits"] = []
   for (const edit of candidate.edits) {
     const path = normalizedRelativePath(projectRoot, edit.path)
     if (path === normalizedTest || !allowed.has(path)) {
-      throw new Error(`Candidate cannot edit unapproved source: ${path}`)
+      throw new CandidateValidationError(
+        "unapproved-source",
+        `Candidate cannot edit unapproved source: ${path}`,
+        path,
+      )
+    }
+    if (SECRET_ASSIGNMENT.test(edit.after)) {
+      throw new CandidateValidationError(
+        "possible-secret",
+        `Candidate introduces a possible credential in ${path}`,
+        path,
+      )
     }
     const content = await readFile(resolve(projectRoot, path), "utf8")
     const before = matchSourceLineEndings(edit.before, content)
     const after = matchSourceLineEndings(edit.after, content)
-    if (FORBIDDEN_ADDITIONS.some((token) => after.includes(token) && !before.includes(token))) {
-      throw new Error(`Candidate introduces a forbidden test-weakening construct in ${path}`)
-    }
-    if (SECRET_ASSIGNMENT.test(after)) {
-      throw new Error(`Candidate introduces a possible credential in ${path}`)
-    }
-    if (onlyRaisesNumericLimits(before, after)) {
-      throw new Error(`Candidate only raises a numeric timing limit in ${path}`)
-    }
     if (occurrences(content, before) !== 1) {
-      throw new Error(`Candidate edit must match exactly one source location in ${path}`)
+      throw new CandidateValidationError(
+        "exact-before-mismatch",
+        `Candidate edit must match exactly one source location in ${path}`,
+        path,
+      )
     }
     normalizedEdits.push({ ...edit, after, before })
   }
   return { ...candidate, edits: normalizedEdits }
+}
+
+export function validateCandidateSemantics(candidate: CandidatePatch): CandidatePatch {
+  for (const edit of candidate.edits) {
+    if (FORBIDDEN_ADDITIONS.some((token) =>
+      edit.after.includes(token) && !edit.before.includes(token))) {
+      throw new CandidateValidationError(
+        "test-weakening",
+        `Candidate introduces a forbidden test-weakening construct in ${edit.path}`,
+        edit.path,
+      )
+    }
+    if (onlyRaisesNumericLimits(edit.before, edit.after)) {
+      throw new CandidateValidationError(
+        "numeric-timing-increase",
+        `Candidate only raises a numeric timing limit in ${edit.path}`,
+        edit.path,
+      )
+    }
+  }
+  return candidate
+}
+
+export async function validateCandidatePatch(
+  projectRoot: string,
+  selectedTest: string,
+  allowedSourcePaths: string[],
+  value: CandidatePatch,
+): Promise<CandidatePatch> {
+  return validateCandidateSemantics(await validateCandidateSafety(
+    projectRoot,
+    selectedTest,
+    allowedSourcePaths,
+    value,
+  ))
 }

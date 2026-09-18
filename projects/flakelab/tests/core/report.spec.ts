@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url"
 
 import { investigationReportSchema } from "../../src/investigator/schema.js"
 import type { ProofOfFix } from "../../src/repair/schema.js"
-import { proofOfFixSchema } from "../../src/repair/schema.js"
+import { candidateInvalidProofSchema, proofOfFixSchema } from "../../src/repair/schema.js"
 import { writePortableReport } from "../../src/report/bundle.js"
 import { buildEvidenceReport } from "../../src/report/model.js"
 import { redactText } from "../../src/report/redaction.js"
@@ -392,4 +392,84 @@ test("portable report presents a rejected candidate without claiming a fix", asy
   const proof = page.getByRole("region", { name: "Proof of repair" })
   await expect(proof.getByRole("row", { name: /After · hostile/u })).toContainText("FAIL")
   await expect(proof.getByTestId("check-eslint")).toContainText("FAIL")
+})
+
+test("candidate-invalid report shows retained attempts without fabricating proof rows", async ({
+  page,
+}, testInfo) => {
+  const invalidProof = candidateInvalidProofSchema.parse({
+    candidateGeneration: {
+      artifactPaths: [
+        ".flakelab/runs/custom/candidates/attempt-1.json",
+        ".flakelab/runs/custom/candidates/attempt-1.diff",
+        ".flakelab/runs/custom/candidates/attempt-1.validation.json",
+      ],
+      attemptCount: 1,
+      attempts: [{
+        artifactPaths: {
+          candidate: ".flakelab/runs/custom/candidates/attempt-1.json",
+          diff: ".flakelab/runs/custom/candidates/attempt-1.diff",
+          validation: ".flakelab/runs/custom/candidates/attempt-1.validation.json",
+        },
+        attempt: 1,
+        candidatePath: "src/checkout.ts",
+        diffRendered: true,
+        outcome: "candidate-invalid",
+        rejection: {
+          attempt: 1,
+          candidatePath: "src/checkout.ts",
+          code: "numeric-timing-increase",
+          correctiveAttemptPermitted: false,
+          diffRendered: true,
+          message: "Candidate only raises a numeric timing limit in src/checkout.ts",
+        },
+        usage: { estimatedCostUsd: 0.002, inputTokens: 80, outputTokens: 20 },
+      }],
+      correctiveAttemptOccurred: false,
+      finalRejection: {
+        attempt: 1,
+        candidatePath: "src/checkout.ts",
+        code: "numeric-timing-increase",
+        correctiveAttemptPermitted: false,
+        diffRendered: true,
+        message: "Candidate only raises a numeric timing limit in src/checkout.ts",
+      },
+      usage: { estimatedCostUsd: 0.002, inputTokens: 80, outputTokens: 20 },
+    },
+    execution: "local-validation",
+    outcome: "candidate-invalid",
+    patchAccepted: false,
+    patchPath: "candidate.diff",
+    resources: { created: 0, live: 0, released: 0 },
+    sourceLocations: [],
+    staticChecks: { lint: null, typecheck: null },
+    staticDiagnostics: {},
+  })
+  const invalidReport = buildEvidenceReport({
+    generatedAt: new Date("2026-09-03T00:00:00.000Z"),
+    investigation,
+    paths: {
+      investigation: "flakelab.investigation.json",
+      patch: "candidate.diff",
+      proof: "flakelab.proof.json",
+      reproducer: "flakelab.repro.yaml",
+    },
+    proof: invalidProof,
+    reproducer,
+  })
+  expect(invalidReport).toMatchObject({
+    status: "CANDIDATE_INVALID",
+    proof: { matrix: [], resources: { created: 0, live: 0, released: 0 } },
+    usage: { candidateGeneration: { inputTokens: 80, outputTokens: 20 } },
+  })
+
+  const outputPath = testInfo.outputPath("flakelab.candidate-invalid.html")
+  await writePortableReport(process.cwd(), outputPath, invalidReport)
+  await page.goto(pathToFileURL(outputPath).href)
+  await expect(page.getByText("CANDIDATE INVALID")).toBeVisible()
+  await expect(page.getByRole("region", { name: "Candidate attempts" })).toContainText(
+    "numeric-timing-increase",
+  )
+  await expect(page.getByRole("region", { name: "Proof matrix" })).toHaveCount(0)
+  await expect(page.getByText("No Solari proof matrix ran for an invalid candidate.")).toBeVisible()
 })

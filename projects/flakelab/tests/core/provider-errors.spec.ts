@@ -56,6 +56,22 @@ test("non-provider failures remain unchanged", () => {
   expect(cliErrorMessage(error)).toBe("local validation failed")
 })
 
+test("provider failures remain actionable through a domain error cause", () => {
+  const provider = new APICallError({
+    message: "raw provider message",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    requestBodyValues: {},
+    statusCode: 429,
+    responseHeaders: {},
+    responseBody: "{}",
+    isRetryable: true,
+  })
+  const wrapped = new Error("Candidate provider failed", { cause: provider })
+
+  expect(cliErrorMessage(wrapped)).toContain("Groq rate-limit · HTTP 429")
+  expect(cliErrorMessage(wrapped)).not.toContain("raw provider message")
+})
+
 test("low-level Solari responses use machine-readable error codes", async () => {
   const response = new Response(JSON.stringify({
     code: "InsufficientCredit",

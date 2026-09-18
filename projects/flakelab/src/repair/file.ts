@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises"
 
-import { proofOfFixSchema } from "./schema.js"
-import type { ProofOfFix } from "./schema.js"
+import { repairEvidenceSchema } from "./schema.js"
+import type { RepairEvidence } from "./schema.js"
 
-export async function readProofOfFix(path: string): Promise<ProofOfFix> {
-  return proofOfFixSchema.parse(JSON.parse(await readFile(path, "utf8")))
+export async function readProofOfFix(path: string): Promise<RepairEvidence> {
+  return repairEvidenceSchema.parse(JSON.parse(await readFile(path, "utf8")))
 }

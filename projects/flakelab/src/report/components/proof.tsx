@@ -81,6 +81,31 @@ function MatrixTable({ matrix }: Readonly<{
   </TableScroll></>
 }
 
+function CandidateAttempts({ report }: Readonly<{
+  report: EvidenceReport
+}>): React.JSX.Element | undefined {
+  if (report.proof.attempts.length === 0) return undefined
+  return <TableScroll label="Candidate attempts">
+    <table className="grid">
+      <caption className="sr-only">Candidate attempts</caption>
+      <thead><tr>
+        <th scope="col">Attempt</th>
+        <th scope="col">Diff</th>
+        <th scope="col">Outcome</th>
+        <th scope="col">Reason</th>
+      </tr></thead>
+      <tbody>{report.proof.attempts.map((attempt) => <tr key={attempt.attempt}>
+        <th scope="row">{attempt.attempt}</th>
+        <td>{attempt.diffRendered ? "rendered" : "unavailable"}</td>
+        <td>{attempt.outcome}</td>
+        <td>{attempt.rejection
+          ? `${attempt.rejection.code}: ${attempt.rejection.message}`
+          : "Passed local validation"}</td>
+      </tr>)}</tbody>
+    </table>
+  </TableScroll>
+}
+
 export function ProofSection({ report }: Readonly<{
   report: EvidenceReport
 }>): React.JSX.Element {
@@ -105,6 +130,9 @@ export function ProofSection({ report }: Readonly<{
       Repository fingerprint: <span className="mono">{report.repository.fingerprint}</span>
       {` · drift ${report.repository.drift}`}
     </p>}
-    <MatrixTable matrix={proof.matrix} />
+    <CandidateAttempts report={report} />
+    {proof.matrix.length > 0
+      ? <MatrixTable matrix={proof.matrix} />
+      : <p className="table-note">No Solari proof matrix ran for an invalid candidate.</p>}
   </Section>
 }

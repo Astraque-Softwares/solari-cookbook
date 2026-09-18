@@ -1,5 +1,5 @@
 import type { ExperimentCondition, InvestigationReport } from "../investigator/schema.js"
-import type { ProofOfFix } from "../repair/schema.js"
+import type { RepairEvidence } from "../repair/schema.js"
 import type { Reproducer } from "../reproducer/schema.js"
 import { classifyFailure } from "./classification.js"
 import { redactText } from "./redaction.js"
@@ -17,7 +17,7 @@ interface BuildReportOptions {
   generatedAt?: Date
   investigation: InvestigationReport
   paths: ReportPaths
-  proof: ProofOfFix
+  proof: RepairEvidence
   repository?: {
     fingerprint: string
   }
@@ -178,10 +178,9 @@ function cleanResult(result: {
   }
 }
 
-export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport {
-  const { investigation, proof, reproducer } = options
-  const ownership = classifyFailure(investigation)
-  const matrix = [
+function proofMatrix(proof: RepairEvidence) {
+  if (proof.outcome === "candidate-invalid") return []
+  return [
     { label: "Before · hostile", result: cleanResult(proof.beforeHostile) },
     { label: "After · hostile", result: cleanResult(proof.afterHostile) },
     { label: "After · clean", result: cleanResult(proof.afterControl) },
@@ -190,6 +189,82 @@ export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport
       result: cleanResult(regression.result),
     })),
   ]
+}
+
+function reportStatus(proof: RepairEvidence): EvidenceReport["status"] {
+  if (proof.outcome === "candidate-invalid") return "CANDIDATE_INVALID"
+  return proof.patchAccepted ? "FIX_PROVEN" : "PATCH_REJECTED"
+}
+
+function proofOutcome(proof: RepairEvidence): EvidenceReport["proof"]["outcome"] {
+  if (proof.outcome === "candidate-invalid") return "candidate-invalid"
+  if (proof.outcome === "candidate-proven" || proof.outcome === "candidate-rejected") {
+    return proof.outcome
+  }
+  return proof.patchAccepted ? "candidate-proven" : "candidate-rejected"
+}
+
+function reportAttempts(proof: RepairEvidence): EvidenceReport["proof"]["attempts"] {
+  return (proof.candidateGeneration?.attempts ?? []).map((attempt) => ({
+    artifactPaths: {
+      candidate: safeReportPath(attempt.artifactPaths.candidate),
+      diff: attempt.artifactPaths.diff ? safeReportPath(attempt.artifactPaths.diff) : null,
+      validation: safeReportPath(attempt.artifactPaths.validation),
+    },
+    attempt: attempt.attempt,
+    candidatePath: attempt.candidatePath ? safeReportPath(attempt.candidatePath) : null,
+    diffRendered: attempt.diffRendered,
+    outcome: attempt.outcome,
+    rejection: attempt.rejection ? {
+      code: attempt.rejection.code,
+      message: redactText(attempt.rejection.message),
+    } : null,
+  }))
+}
+
+function reportUsage(
+  investigation: InvestigationReport,
+  proof: RepairEvidence,
+): EvidenceReport["usage"] {
+  const candidateGeneration = proof.candidateGeneration?.usage ?? {
+    estimatedCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  }
+  return {
+    investigation: investigation.usage,
+    candidateGeneration,
+    combined: {
+      estimatedCostUsd: investigation.usage.estimatedCostUsd
+        + candidateGeneration.estimatedCostUsd,
+      inputTokens: investigation.usage.inputTokens + candidateGeneration.inputTokens,
+      outputTokens: investigation.usage.outputTokens + candidateGeneration.outputTokens,
+    },
+  }
+}
+
+function artifactLinks(
+  paths: ReportPaths,
+  proof: RepairEvidence,
+): EvidenceReport["artifacts"] {
+  const links = [
+    { label: "Investigation", path: safeReportPath(paths.investigation) },
+    { label: "Reproducer", path: safeReportPath(paths.reproducer) },
+    { label: "Proof of fix", path: safeReportPath(paths.proof) },
+  ]
+  if (proof.outcome !== "candidate-invalid") {
+    links.splice(2, 0, { label: "Candidate patch", path: safeReportPath(paths.patch) })
+  }
+  links.push(...(proof.candidateGeneration?.artifactPaths ?? []).map((path, index) => ({
+    label: `Candidate attempt evidence ${index + 1}`,
+    path: safeReportPath(path),
+  })))
+  return links
+}
+
+export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport {
+  const { investigation, proof, reproducer } = options
+  const ownership = classifyFailure(investigation)
   const controlExperimentIds = investigation.experiments
     .filter((experiment) => experiment.condition.kind === "baseline")
     .map((experiment) => experiment.id)
@@ -208,7 +283,7 @@ export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport
     ...(options.repository ? {
       repository: { drift: "unchanged", fingerprint: options.repository.fingerprint },
     } : {}),
-    status: proof.patchAccepted ? "FIX_PROVEN" : "PATCH_REJECTED",
+    status: reportStatus(proof),
     test: redactText(investigation.test),
     model: redactText(investigation.model),
     conclusion: redactText(investigation.conclusion),
@@ -257,19 +332,13 @@ export function buildEvidenceReport(options: BuildReportOptions): EvidenceReport
     proof: {
       accepted: proof.patchAccepted,
       execution: proof.execution,
-      outcome: proof.outcome === "candidate-proven" || proof.outcome === "candidate-rejected"
-        ? proof.outcome
-        : undefined,
+      outcome: proofOutcome(proof),
+      attempts: reportAttempts(proof),
       resources: proof.resources,
       staticChecks: proof.staticChecks,
-      matrix,
+      matrix: proofMatrix(proof),
     },
-    usage: investigation.usage,
-    artifacts: [
-      { label: "Investigation", path: safeReportPath(options.paths.investigation) },
-      { label: "Reproducer", path: safeReportPath(options.paths.reproducer) },
-      { label: "Candidate patch", path: safeReportPath(options.paths.patch) },
-      { label: "Proof of fix", path: safeReportPath(options.paths.proof) },
-    ],
+    usage: reportUsage(investigation, proof),
+    artifacts: artifactLinks(options.paths, proof),
   })
 }

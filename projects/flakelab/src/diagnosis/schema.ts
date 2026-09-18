@@ -4,6 +4,7 @@ import { scanStatusSchema } from "../scan/schema.js"
 import { portableRepositoryProfileSchema } from "../project/schema.js"
 
 export const diagnosisStageSchema = z.enum([
+  "candidate-invalid",
   "observed",
   "no-signal-observed",
   "reproducer-created",
@@ -96,6 +97,48 @@ export const diagnosisArtifactSchema = z.object({
     scan: z.string().min(1).nullable(),
   }),
   cache: snapshotCacheSchema,
+  candidateGeneration: z.object({
+    artifactPaths: z.array(z.string().min(1).max(1_000)).max(6),
+    attemptCount: z.number().int().min(1).max(2),
+    attempts: z.array(z.object({
+      artifactPaths: z.object({
+        candidate: z.string().min(1).max(1_000),
+        diff: z.string().min(1).max(1_000).nullable(),
+        validation: z.string().min(1).max(1_000),
+      }),
+      attempt: z.number().int().min(1).max(2),
+      candidatePath: z.string().min(1).max(500).nullable(),
+      diffRendered: z.boolean(),
+      outcome: z.enum(["candidate-invalid", "pending", "valid"]),
+      rejection: z.object({
+        attempt: z.number().int().min(1).max(2),
+        candidatePath: z.string().min(1).max(500).optional(),
+        code: z.string().min(1),
+        correctiveAttemptPermitted: z.boolean(),
+        diffRendered: z.boolean(),
+        message: z.string().min(1).max(2_000),
+      }).nullable(),
+      usage: z.object({
+        estimatedCostUsd: z.number().nonnegative(),
+        inputTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+      }),
+    })).min(1).max(2),
+    correctiveAttemptOccurred: z.boolean(),
+    finalRejection: z.object({
+      attempt: z.number().int().min(1).max(2),
+      candidatePath: z.string().min(1).max(500).optional(),
+      code: z.string().min(1),
+      correctiveAttemptPermitted: z.boolean(),
+      diffRendered: z.boolean(),
+      message: z.string().min(1).max(2_000),
+    }).nullable(),
+    usage: z.object({
+      estimatedCostUsd: z.number().nonnegative(),
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+    }),
+  }).nullable().default(null),
   cleanup: z.object({
     liveResources: z.number().int().nonnegative().nullable(),
     status: z.enum(["confirmed", "not-required", "unconfirmed"]),

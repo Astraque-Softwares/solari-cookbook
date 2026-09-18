@@ -112,6 +112,56 @@ test("resume planning starts after the last completed phase", () => {
   expect(nextDiagnosisPhase({ ...observed, stage: "reproducer-created" })).toBe("investigate")
   expect(nextDiagnosisPhase({ ...observed, stage: "investigated" })).toBe("repair")
   expect(nextDiagnosisPhase({ ...observed, stage: "repair-proven" })).toBe("complete")
+  expect(nextDiagnosisPhase({ ...observed, stage: "candidate-invalid" })).toBe("complete")
+})
+
+test("candidate-invalid checkpoints retain bounded attempt usage and artifacts", () => {
+  const value = diagnosisArtifactSchema.parse({
+    ...checkpoint(),
+    candidateGeneration: {
+      artifactPaths: [
+        ".flakelab/runs/custom/candidates/attempt-1.json",
+        ".flakelab/runs/custom/candidates/attempt-1.validation.json",
+      ],
+      attemptCount: 1,
+      attempts: [{
+        artifactPaths: {
+          candidate: ".flakelab/runs/custom/candidates/attempt-1.json",
+          diff: null,
+          validation: ".flakelab/runs/custom/candidates/attempt-1.validation.json",
+        },
+        attempt: 1,
+        candidatePath: null,
+        diffRendered: false,
+        outcome: "candidate-invalid",
+        rejection: {
+          attempt: 1,
+          code: "unsafe-path",
+          correctiveAttemptPermitted: false,
+          diffRendered: false,
+          message: "Candidate edits must stay inside project source",
+        },
+        usage: { estimatedCostUsd: 0.001, inputTokens: 30, outputTokens: 10 },
+      }],
+      correctiveAttemptOccurred: false,
+      finalRejection: {
+        attempt: 1,
+        code: "unsafe-path",
+        correctiveAttemptPermitted: false,
+        diffRendered: false,
+        message: "Candidate edits must stay inside project source",
+      },
+      usage: { estimatedCostUsd: 0.001, inputTokens: 30, outputTokens: 10 },
+    },
+    stage: "candidate-invalid",
+    status: "complete",
+  })
+
+  expect(value.candidateGeneration).toMatchObject({
+    attemptCount: 1,
+    finalRejection: { code: "unsafe-path" },
+    usage: { inputTokens: 30, outputTokens: 10 },
+  })
 })
 
 test("checkpoint writes replace atomically and validate their input hash", async ({

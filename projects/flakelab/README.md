@@ -205,8 +205,9 @@ completes as `no-signal-observed`, retains
 the screened, covered, and inapplicable families with reasons in its discovery sidecar, and does
 not request provider credentials or invent a reproducer. `--investigate` explicitly enables
 bounded Groq usage and retains both the reproducer and investigation evidence. `--repair`
-explicitly enables candidate generation and a disposable Solari proof; a rejected candidate still
-produces the portable evidence report. When starting from `--report`, supply a test target before
+explicitly enables candidate generation and, only after local validation, a disposable Solari
+proof. A locally invalid or remotely rejected candidate still produces a portable evidence report.
+When starting from `--report`, supply a test target before
 requesting new experiments so FlakeLab never guesses which test to execute.
 
 Every diagnosis writes `diagnose.json` atomically after each completed phase and when work fails
@@ -413,14 +414,29 @@ pnpm flakelab repair flakelab.investigation.json \
   --proof flakelab.proof.json
 ```
 
-This command requires both `GROQ_API_KEY` and `SOLARI_API_KEY`. `--max-cost` bounds candidate
-generation, and the result reports observed model tokens and estimated cost. Repeat `--source` to
+The complete command can require both `GROQ_API_KEY` and `SOLARI_API_KEY`; Solari is not contacted
+until a candidate passes local policy and preflight. `--max-cost` bounds candidate generation, and
+the result reports observed model tokens and estimated cost even when generation fails. Repeat `--source` to
 approve up to seven application source files that a black-box Playwright test does not import.
 Every approved file remains project-confined, JavaScript/TypeScript-only, credential-blocked, and
 inside the shared 64 KiB context limit. The model can propose only exact, bounded edits to source it
 received. FlakeLab rejects test changes,
 assertion weakening, lint suppressions, credential-like additions, path escapes, and numeric-only
-timeout increases before execution.
+timeout increases before execution. A timing-only increase hides the confirmed race instead of
+repairing its lifecycle, so it remains prohibited; removing an unjustified timer can be valid.
+
+An adaptive `diagnose` invocation makes at most two Groq requests total. After confirmed discovery,
+it reserves one comprehensive request for investigation planning and one for the initial repair
+candidate. It disables hidden provider retries inside that bound. If the candidate is locally
+invalid, FlakeLab retains a `candidate-invalid` result instead of immediately risking a third
+request; a later explicit `repair` invocation can make a fresh bounded attempt after the provider
+window resets. A standalone `repair` still makes at most two model calls: an initial proposal and
+one corrective proposal. The correction includes the first attempt's structured rejection and
+explicitly forbids repeating the same semantic edit. Every completed attempt is retained beneath the active artifact
+directory in `candidates/attempt-N.json`, `attempt-N.diff` when safe to render, and
+`attempt-N.validation.json`. With `diagnose --artifacts <path>`, these files stay under that exact
+run directory. Unsafe paths and other boundary failures retain safe metadata and validation only;
+FlakeLab never reads a model-provided path before confinement and approved-source checks pass.
 
 The candidate diff is rendered in an interactive terminal and saved to `candidate.diff` before
 proof begins, without changing the working tree. The candidate is then copied into a disposable
@@ -430,6 +446,14 @@ The machine is destroyed afterward, and the
 candidate is returned as a reviewable diff; FlakeLab never applies it to the local checkout.
 Cold validation installs the pinned Node/pnpm toolchain and Chromium, so it is intentionally
 slower than the future snapshot-backed warm path.
+
+The terminal outcome `candidate-invalid` means every candidate allowed by the current provider-call
+budget failed schema, safety, policy, syntax, typecheck, lint, or Playwright-listing validation.
+No Solari resource is allocated
+in that case. `candidate-rejected` has a different meaning: a locally valid candidate reached the
+isolated proof but failed hostile, clean-control, or regression evidence. Reports keep
+investigation and candidate-generation token/cost totals separate, show their combined total, and
+list each retained attempt without inventing proof-matrix rows that never ran.
 
 While an interactive stage is waiting on Playwright, Groq, or Solari, FlakeLab prints a small
 `working...` pulse. Redirected output and CI logs remain static, and machine-readable stdout is
@@ -450,7 +474,9 @@ pnpm flakelab report flakelab.investigation.json \
 
 The React/Recharts interface is bundled by Vite into a single HTML file. It explains the root
 cause, deterministic ownership classification, experiment timeline, competing hypotheses,
-minimal trigger, before/after proof matrix, static checks, model usage, and reviewable artifacts.
+minimal trigger, proof evidence when it ran, static checks, phase-separated model usage, and
+reviewable artifacts. For `candidate-invalid`, it shows local attempts and zero Solari resources
+without fabricating hostile, clean-control, or regression rows.
 Each causal conclusion links to both its intervention and clean control. Investigation mode retains
 project-relative Playwright traces, compares one representative passing control with one failing
 intervention, and links each recording from its experiment. The report also gives an exact replay

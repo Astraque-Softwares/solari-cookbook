@@ -100,6 +100,7 @@ export interface InvestigateOptions {
 }
 
 export interface RepairOptions {
+  artifacts?: string
   concurrency: string
   "max-cost": string
   "max-seconds": string

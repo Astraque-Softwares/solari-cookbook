@@ -108,3 +108,25 @@ test("repair policy matches model snippets to a CRLF source without changing its
   expect(candidate.edits[0].before).toContain("\r\n")
   expect(candidate.edits[0].after).toContain("\r\n")
 })
+
+test("repair policy permits removing an unjustified application timeout", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const fixtureRoot = await createFixture(testInfo)
+  const candidate = {
+    summary: "Let request settlement own application completion",
+    rationale: "Removing the competing timer preserves one lifecycle owner for completion",
+    edits: [{
+      path: appPath,
+      before: "const deadline = setTimeout(expire, 100)",
+      after: "const deadline = undefined",
+    }],
+  }
+
+  await expect(validateCandidatePatch(
+    fixtureRoot,
+    testPath,
+    [appPath],
+    candidate,
+  )).resolves.toEqual(candidate)
+})

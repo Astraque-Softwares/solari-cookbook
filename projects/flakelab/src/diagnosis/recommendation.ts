@@ -41,6 +41,14 @@ function discoveryTrialBound(input: RecommendationInput, target: string): number
   return Math.min(28, screening + 16)
 }
 
+function completedRationale(stage: DiagnosisStage): string {
+  if (stage === "repair-proven") return "The candidate passed the isolated proof matrix."
+  if (stage === "candidate-invalid") {
+    return "No candidate passed bounded local policy; retained attempts explain each rejection."
+  }
+  return "The candidate was rejected; use the retained evidence to revise the repair."
+}
+
 function formattedDuration(seconds: number): string {
   if (seconds < 60) {
     return `about ${Math.max(1, seconds)} second(s)`
@@ -185,9 +193,7 @@ export function buildDiagnosisRecommendation(
     credentials: [],
     expectedDuration: "complete",
     plannedTrials: 0,
-    rationale: input.stage === "repair-proven"
-      ? "The candidate passed the isolated proof matrix."
-      : "The candidate was rejected; use the retained evidence to revise the repair.",
+    rationale: completedRationale(input.stage),
     solariCostEstimateUsd: null,
     solariCostNote: "Actual provider usage is retained with the completed evidence.",
   }

@@ -4,12 +4,14 @@ import { z } from "zod"
 
 import { portableProjectPath } from "../artifacts/paths.js"
 import { nextDiagnosisPhase } from "../diagnosis/checkpoint.js"
+import { recordProofCleanup, recordRepairUsage } from "../diagnosis/repair-state.js"
 import {
   addDiagnosisUsage,
   analysisObservation,
   createDiagnosisContext,
   emptyObservation,
   emptyPaths,
+  recordCandidateGenerationProgress,
   saveDiagnosis,
   scanObservation,
 } from "../diagnosis/run-state.js"
@@ -31,14 +33,13 @@ import {
   discoverAndWriteRepositoryProfile,
 } from "../project/profile.js"
 import type { RepositoryProfile } from "../project/schema.js"
+import { ProviderRequestBudget } from "../providers/request-budget.js"
 import { redactText } from "../report/redaction.js"
 import { SolariProofError } from "../repair/solari-validator.js"
 import { writeStdout } from "../ui/console.js"
 import { stdoutTheme } from "../ui/theme.js"
 import { integerOption } from "./options.js"
 import type { DiagnoseOptions } from "./options.js"
-import type { RepairResult } from "./repair.js"
-import type { ProofResources } from "../repair/solari-validator.js"
 import { offerSolariProof } from "./diagnosis-proof-offer.js"
 import { discoveryPathFor } from "./discovery-outcome.js"
 
@@ -46,6 +47,8 @@ const discoveryEvidenceSchema = z.object({
   trigger: experimentConditionSchema,
   triggerResult: experimentResultSchema,
 })
+
+const DIAGNOSIS_GROQ_REQUEST_LIMIT = 2
 
 function shouldRunScan(
   target: string | undefined,
@@ -227,7 +230,10 @@ function requiredEvidencePattern(
     : undefined
 }
 
-async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
+async function runInvestigationStage(
+  context: DiagnosisContext,
+  providerBudget: ProviderRequestBudget,
+): Promise<void> {
   const { projectRoot, target, values } = context
   const { investigate } = await import("./investigate.js")
   const startedAt = Date.now()
@@ -251,7 +257,10 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
     report: values.evidence,
     seed: values.seed,
     trials: values.trials,
-    }, requiredEvidence, context.repository)
+    }, requiredEvidence, context.repository, {
+      beforeProviderRequest: () => providerBudget.reserve(),
+      maxPlanAttempts: context.values.repair ? 1 : Math.min(2, providerBudget.remaining()),
+    })
   } catch (error) {
     const failure = error instanceof Error ? error : new Error("Investigation failed")
     recordInvestigationFailure(context, failure, requiredEvidence, startedAt)
@@ -270,43 +279,21 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
   })
 }
 
-function recordProofUsage(
+async function runRepairStage(
   context: DiagnosisContext,
-  result: RepairResult,
-  elapsedMilliseconds: number,
-): void {
-  addDiagnosisUsage(context, {
-    aiEstimatedCostUsd: result.usage.estimatedCostUsd,
-    aiInputTokens: result.usage.inputTokens,
-    aiOutputTokens: result.usage.outputTokens,
-    elapsedMilliseconds,
-    executions: result.proof.beforeHostile.trials
-      + result.proof.afterHostile.trials
-      + result.proof.afterControl.trials
-      + result.proof.regressions.reduce(
-        (total, regression) => total + regression.result.trials,
-        0,
-      ),
-    solariSandboxesCreated: result.proof.resources?.created ?? 0,
-    solariSandboxesKilled: result.proof.resources?.released ?? 0,
-    solariCostUsd: null,
-  })
-}
-
-function recordProofCleanup(context: DiagnosisContext, resources?: ProofResources): void {
-  context.checkpoint.cleanup = {
-    liveResources: resources?.live ?? 0,
-    status: resources ? "confirmed" : "unconfirmed",
-  }
-}
-
-async function runRepairStage(context: DiagnosisContext): Promise<DiagnosisStage> {
+  providerBudget: ProviderRequestBudget,
+): Promise<DiagnosisStage> {
   const { projectRoot, values } = context
   const { repair } = await import("./repair.js")
   const startedAt = Date.now()
   if (!context.repository) throw new Error("Diagnosis repository profile is missing")
+  const maxCandidateAttempts = Math.min(2, providerBudget.remaining())
+  if (maxCandidateAttempts < 1) {
+    throw new Error("Diagnosis Groq request budget was exhausted before candidate generation")
+  }
   await assertRepositoryUnchanged(context.repository)
   const result = await repair(values.evidence, {
+    artifacts: values.artifacts,
     concurrency: "1",
     "max-cost": values["max-cost"],
     "max-seconds": values["max-seconds"],
@@ -316,19 +303,27 @@ async function runRepairStage(context: DiagnosisContext): Promise<DiagnosisStage
     "prompt-credentials": values["prompt-credentials"],
     reproducer: values.reproducer,
     source: values.source,
-  }, context.repository)
-  const repairRejected = process.exitCode === 1
+  }, context.repository, {
+    artifactDirectory: values.artifacts,
+    beforeProviderRequest: () => providerBudget.reserve(),
+    maxCandidateAttempts,
+    onCandidateProgress: async (evidence) => recordCandidateGenerationProgress(context, evidence),
+  })
+  const repairRejected = result.outcome !== "candidate-proven"
   process.exitCode = undefined
-  context.checkpoint.artifacts.patch = portableProjectPath(projectRoot, values.patch)
+  context.checkpoint.artifacts.patch = result.outcome === "candidate-invalid"
+    ? null
+    : portableProjectPath(projectRoot, values.patch)
   context.checkpoint.artifacts.proof = portableProjectPath(projectRoot, values.proof)
-  recordProofUsage(context, result, Date.now() - startedAt)
+  recordRepairUsage(context, result, Date.now() - startedAt)
   context.checkpoint.cache = {
     key: null,
     reason: "Candidate proof uploads a unique patched workspace, so no prepared snapshot applies.",
     status: "not-used",
   }
   recordProofCleanup(context, result.proof.resources)
-  const stage = repairRejected ? "repair-rejected" : "repair-proven"
+  let stage: DiagnosisStage = repairRejected ? "repair-rejected" : "repair-proven"
+  if (result.outcome === "candidate-invalid") stage = "candidate-invalid"
   const { generateReport } = await import("./report.js")
   await generateReport(values.evidence, {
     html: values.html,
@@ -348,7 +343,7 @@ function finalStage(context: DiagnosisContext, stage: DiagnosisStage): boolean {
   if (stage === "no-signal-observed") {
     return true
   }
-  if (stage === "repair-proven" || stage === "repair-rejected") {
+  if (stage === "candidate-invalid" || stage === "repair-proven" || stage === "repair-rejected") {
     return true
   }
   if (stage === "investigated") {
@@ -384,20 +379,23 @@ async function requireCheckpointArtifact(
   }
 }
 
-async function runNextPhase(context: DiagnosisContext): Promise<DiagnosisStage> {
+async function runNextPhase(
+  context: DiagnosisContext,
+  providerBudget: ProviderRequestBudget,
+): Promise<DiagnosisStage> {
   const phase = nextDiagnosisPhase(context.checkpoint)
   if (phase === "discover") {
     return runDiscoveryStage(context)
   }
   if (phase === "investigate") {
     await requireCheckpointArtifact(context, "reproducer")
-    await runInvestigationStage(context)
+    await runInvestigationStage(context, providerBudget)
     return "investigated"
   }
   if (phase === "repair") {
     await requireCheckpointArtifact(context, "reproducer")
     await requireCheckpointArtifact(context, "evidence")
-    return runRepairStage(context)
+    return runRepairStage(context, providerBudget)
   }
   return context.checkpoint.stage
 }
@@ -432,6 +430,7 @@ async function saveFailedDiagnosis(context: DiagnosisContext, error: Error): Pro
 }
 
 export async function continueSavedDiagnosis(context: DiagnosisContext): Promise<void> {
+  const providerBudget = new ProviderRequestBudget(DIAGNOSIS_GROQ_REQUEST_LIMIT)
   const portableArtifactPath = portableProjectPath(context.projectRoot, context.artifactPath)
   if (nextDiagnosisPhase(context.checkpoint) === "complete") {
     const artifact = await saveDiagnosis(context, context.checkpoint.stage, "complete")
@@ -441,7 +440,7 @@ export async function continueSavedDiagnosis(context: DiagnosisContext): Promise
   await saveDiagnosis(context, context.checkpoint.stage, "running")
   try {
     while (nextDiagnosisPhase(context.checkpoint) !== "complete") {
-      const stage = await runNextPhase(context)
+      const stage = await runNextPhase(context, providerBudget)
       await saveDiagnosis(context, stage, finalStage(context, stage) ? "complete" : "running")
     }
   } catch (cause) {
@@ -502,7 +501,6 @@ export async function diagnose(
   await continueSavedDiagnosis(context)
   await offerSolariProof(context, repositoryRestart, diagnose)
 }
-
 export async function resumeDiagnosis(path: string): Promise<void> {
   const { resumeSavedDiagnosis } = await import("./resume-diagnosis.js")
   await resumeSavedDiagnosis(path)

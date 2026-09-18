@@ -9,6 +9,7 @@ import { repositoryEnvironment } from "../project/profile.js"
 import { createPlaywrightEnvironment } from "../runner/playwright-executor.js"
 import { waitForProcessTree } from "../runner/process-tree.js"
 import { projectPlan, type ProjectCommand } from "./project-plan.js"
+import { CandidateValidationError } from "./rejection.js"
 import type { CandidatePatch } from "./schema.js"
 import { applyCandidatePatch, createPatchWorkspace } from "./workspace.js"
 
@@ -19,6 +20,13 @@ export interface CandidatePreflight {
   testListed: boolean
   typecheck: boolean | null
 }
+
+interface CheckResult {
+  diagnostic: string
+  passed: boolean
+}
+
+const CHECK_DIAGNOSTIC_LIMIT = 50_000
 
 function scriptKind(path: string): ts.ScriptKind {
   if (path.endsWith(".tsx")) return ts.ScriptKind.TSX
@@ -47,7 +55,11 @@ async function validateSyntax(root: string, candidate: CandidatePatch): Promise<
     if (diagnostics.length > 0) {
       const diagnostic = diagnostics[0]
       const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")
-      throw new Error(`Candidate syntax is invalid in ${edit.path}: ${message}`)
+      throw new CandidateValidationError(
+        "syntax-invalid",
+        `Candidate syntax is invalid in ${edit.path}: ${message}`,
+        edit.path,
+      )
     }
   }
 }
@@ -75,7 +87,7 @@ async function execute(
   cwd: string,
   signal?: AbortSignal,
   environment: NodeJS.ProcessEnv = {},
-): Promise<{ diagnostic: string; passed: boolean }> {
+): Promise<CheckResult> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), COMMAND_TIMEOUT_MS)
   const abort = (): void => controller.abort()
@@ -92,7 +104,10 @@ async function execute(
     })
     const result = await waitForProcessTree(child, controller.signal)
     const diagnostic = result.spawnError ?? result.diagnostic
-    return { diagnostic: diagnostic.slice(-2_000), passed: result.exitCode === 0 }
+    return {
+      diagnostic: diagnostic.slice(-CHECK_DIAGNOSTIC_LIMIT),
+      passed: result.exitCode === 0,
+    }
   } finally {
     clearTimeout(timeout)
     signal?.removeEventListener("abort", abort)
@@ -122,19 +137,99 @@ async function runCheck(
   command: ProjectCommand | undefined,
   signal?: AbortSignal,
   environment: NodeJS.ProcessEnv = {},
-): Promise<boolean | null> {
+): Promise<CheckResult | null> {
   if (!command) return null
-  const result = await execute(
+  return execute(
     command.command,
     command.args,
     resolve(root, command.directory),
     signal,
     environment,
   )
-  if (!result.passed) {
-    throw new Error(`Candidate ${command.args.at(-1) ?? "check"} failed: ${result.diagnostic}`)
+}
+
+function diagnosticSignatures(diagnostic: string): Set<string> {
+  const lines = diagnostic
+    .replaceAll("\u001B", "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isVolatileCheckProgress(line))
+  const structured = lines.filter((line) =>
+    /\berror TS\d+:/u.test(line)
+    || /^\d+:\d+\s+(?:error|warning)\s+/u.test(line))
+  const selected = structured.length > 0 ? structured : lines
+  return new Set(selected.map((line) => line
+    .replace(/\(\d+,\d+\)/gu, "(<line>,<column>)")
+    .replace(/^\d+:\d+/u, "<line>:<column>")))
+}
+
+function isVolatileCheckProgress(line: string): boolean {
+  return /\.[A-Za-z0-9]+ \(\d+(?:\.\d+)?ms\)$/u.test(line)
+    || /^Finished in \d+(?:\.\d+)?ms on \d+ files using \d+ threads\.?$/u.test(line)
+}
+
+export function newCandidateDiagnostics(
+  baseline: CheckResult,
+  candidate: CheckResult,
+): string[] {
+  if (candidate.passed) return []
+  if (baseline.passed) {
+    const candidateDiagnostics = [...diagnosticSignatures(candidate.diagnostic)]
+    return candidateDiagnostics.length > 0
+      ? candidateDiagnostics
+      : ["check changed from passing to failing without a diagnostic"]
+  }
+  const known = diagnosticSignatures(baseline.diagnostic)
+  return [...diagnosticSignatures(candidate.diagnostic)].filter((line) => !known.has(line))
+}
+
+function validateCheck(
+  command: ProjectCommand | undefined,
+  baseline: CheckResult | null,
+  candidate: CheckResult | null,
+  code: "lint-new-diagnostic" | "typecheck-new-diagnostic",
+): boolean | null {
+  if (!command || !baseline || !candidate) return null
+  const introduced = newCandidateDiagnostics(baseline, candidate)
+  if (introduced.length > 0) {
+    const label = command.args.at(-1) ?? "check"
+    throw new CandidateValidationError(
+      code,
+      `Candidate ${label} introduced new errors: ${introduced.join("\n")}`,
+    )
   }
   return true
+}
+
+function reverseCandidate(candidate: CandidatePatch): CandidatePatch {
+  return {
+    ...candidate,
+    edits: candidate.edits.map((edit) => ({
+      ...edit,
+      after: edit.before,
+      before: edit.after,
+    })),
+  }
+}
+
+async function validateCandidateCheck(
+  root: string,
+  command: ProjectCommand | undefined,
+  candidate: CandidatePatch,
+  code: "lint-new-diagnostic" | "typecheck-new-diagnostic",
+  signal?: AbortSignal,
+  environment: NodeJS.ProcessEnv = {},
+): Promise<boolean | null> {
+  const candidateResult = await runCheck(root, command, signal, environment)
+  if (!command || !candidateResult) return null
+  if (candidateResult.passed) return true
+  await applyCandidatePatch(root, reverseCandidate(candidate))
+  try {
+    const baselineResult = await runCheck(root, command, signal, environment)
+    return validateCheck(command, baselineResult, candidateResult, code)
+  } finally {
+    await applyCandidatePatch(root, candidate)
+  }
 }
 
 async function listCandidateTest(
@@ -156,7 +251,12 @@ async function listCandidateTest(
     "--list",
     "--reporter=json",
   ], executionRoot, signal, repositoryEnvironment(profile))
-  if (!result.passed) throw new Error(`Candidate no longer lists the selected test: ${result.diagnostic}`)
+  if (!result.passed) {
+    throw new CandidateValidationError(
+      "selected-test-not-listed",
+      `Candidate no longer lists the selected test: ${result.diagnostic}`,
+    )
+  }
 }
 
 export async function preflightCandidate(
@@ -167,7 +267,6 @@ export async function preflightCandidate(
   await validateSyntax(profile.workspaceRoot, candidate)
   const workspace = await createPatchWorkspace(profile.executionRoot)
   try {
-    await applyCandidatePatch(workspace.uploadRoot, candidate)
     await linkDependencies(profile.workspaceRoot, workspace.uploadRoot)
     if (profile.executionRoot !== profile.workspaceRoot) {
       await linkDependencies(profile.executionRoot, workspace.root)
@@ -177,8 +276,23 @@ export async function preflightCandidate(
       const split = entry.indexOf("=")
       return [entry.slice(0, split), entry.slice(split + 1)]
     }))
-    const typecheck = await runCheck(workspace.uploadRoot, plan.typecheck, signal, environment)
-    const lint = await runCheck(workspace.uploadRoot, plan.lint, signal, environment)
+    await applyCandidatePatch(workspace.uploadRoot, candidate)
+    const typecheck = await validateCandidateCheck(
+      workspace.uploadRoot,
+      plan.typecheck,
+      candidate,
+      "typecheck-new-diagnostic",
+      signal,
+      environment,
+    )
+    const lint = await validateCandidateCheck(
+      workspace.uploadRoot,
+      plan.lint,
+      candidate,
+      "lint-new-diagnostic",
+      signal,
+      environment,
+    )
     await listCandidateTest(profile, workspace.uploadRoot, signal)
     return { lint, testListed: true, typecheck }
   } finally {

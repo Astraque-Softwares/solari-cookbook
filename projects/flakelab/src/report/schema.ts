@@ -39,7 +39,7 @@ export const evidenceReportSchema = z.object({
     drift: z.literal("unchanged"),
     fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
   }).optional(),
-  status: z.enum(["FIX_PROVEN", "PATCH_REJECTED"]),
+  status: z.enum(["CANDIDATE_INVALID", "FIX_PROVEN", "PATCH_REJECTED"]),
   test: z.string().min(1).max(500),
   model: z.string().min(1).max(200),
   conclusion: z.string().min(1).max(2_000),
@@ -76,11 +76,26 @@ export const evidenceReportSchema = z.object({
   sourceLocations: z.array(z.object({
     line: z.number().int().positive(),
     path: z.string().min(1).max(500),
-  })).min(1).max(3),
+  })).max(3),
   proof: z.object({
     accepted: z.boolean(),
-    execution: z.literal("solari-microvm"),
-    outcome: z.enum(["candidate-rejected", "candidate-proven"]).optional(),
+    attempts: z.array(z.object({
+      artifactPaths: z.object({
+        candidate: z.string().min(1).max(1_000),
+        diff: z.string().min(1).max(1_000).nullable(),
+        validation: z.string().min(1).max(1_000),
+      }),
+      attempt: z.number().int().min(1).max(2),
+      candidatePath: z.string().min(1).max(500).nullable(),
+      diffRendered: z.boolean(),
+      outcome: z.enum(["candidate-invalid", "pending", "valid"]),
+      rejection: z.object({
+        code: z.string().min(1),
+        message: z.string().min(1).max(2_000),
+      }).nullable(),
+    })).max(2),
+    execution: z.enum(["local-validation", "solari-microvm"]),
+    outcome: z.enum(["candidate-invalid", "candidate-rejected", "candidate-proven"]),
     resources: z.object({
       created: z.number().int().nonnegative(),
       live: z.number().int().nonnegative(),
@@ -90,12 +105,24 @@ export const evidenceReportSchema = z.object({
     matrix: z.array(z.object({
       label: z.string().min(1),
       result: resultSchema,
-    })).min(3),
+    })),
   }),
   usage: z.object({
-    inputTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative(),
-    estimatedCostUsd: z.number().nonnegative(),
+    candidateGeneration: z.object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      estimatedCostUsd: z.number().nonnegative(),
+    }),
+    combined: z.object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      estimatedCostUsd: z.number().nonnegative(),
+    }),
+    investigation: z.object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      estimatedCostUsd: z.number().nonnegative(),
+    }),
   }),
   artifacts: z.array(z.object({
     label: z.string().min(1).max(100),

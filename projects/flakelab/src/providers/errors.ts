@@ -219,7 +219,9 @@ export function normalizeProviderError(error: Error): Error {
   if (APICallError.isInstance(error)) {
     return mapGroqError(error)
   }
-  return mapSolariError(error) ?? error
+  const solari = mapSolariError(error)
+  if (solari) return solari
+  return error.cause instanceof Error ? normalizeProviderError(error.cause) : error
 }
 
 export function cliErrorMessage(error: Error): string {

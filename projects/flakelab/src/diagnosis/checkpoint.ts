@@ -15,6 +15,7 @@ export function diagnosisInputHash(input: DiagnosisArtifact["input"]): string {
 export function nextDiagnosisPhase(checkpoint: DiagnosisArtifact): DiagnosisPhase {
   const workflow = checkpoint.input.options
   const phases: Record<DiagnosisArtifact["stage"], DiagnosisPhase> = {
+    "candidate-invalid": "complete",
     investigated: workflow.repair ? "repair" : "complete",
     "no-signal-observed": "complete",
     observed: workflow.discover || workflow.investigate || workflow.repair
