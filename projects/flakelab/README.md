@@ -349,6 +349,9 @@ with Groq's [`qwen/qwen3.8-27b`](https://console.groq.com/docs/model/qwen/qwen3.
 model. It makes two bounded model calls: one to propose competing hypotheses and a three-part
 experiment batch, and one to assess the resulting evidence. FlakeLab-not the model-executes
 trials, calculates confidence, enforces budgets, and decides whether a causal claim is valid.
+When diagnosis already confirmed a trigger, that controlled result anchors the primary
+hypothesis. Other interventions that reproduce the same failure are retained as corroborating
+evidence instead of making the investigation fail or being mislabeled as rejected.
 
 The model receives only the selected test and at most eight local imported source files through
 a 64 KiB, path-confined, credential-blocking reader. The resulting evidence-backed report is

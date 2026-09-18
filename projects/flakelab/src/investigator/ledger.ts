@@ -6,6 +6,7 @@ import type {
   InvestigationReport,
 } from "./schema.js"
 import { investigationReportSchema } from "./schema.js"
+import { hasConfirmedCausalSignal } from "./causality.js"
 
 interface UsageSummary {
   estimatedCostUsd: number
@@ -59,7 +60,7 @@ export class InvestigationLedger {
 
   assess(
     hypothesisId: string,
-    status: "rejected" | "confirmed",
+    status: "rejected" | "confirmed" | "corroborating",
     evidenceExperimentIds: string[],
     explanation: string,
   ): Hypothesis {
@@ -67,6 +68,9 @@ export class InvestigationLedger {
     const evidence = this.#resolveEvidence(hypothesisId, evidenceExperimentIds)
     if (status === "confirmed" && !this.#hasCausalIntervention(evidence)) {
       throw new Error("Confirmation requires a fault that increased and confidently reproduced failure")
+    }
+    if (status === "corroborating" && !this.#hasCausalIntervention(evidence)) {
+      throw new Error("Corroboration requires a fault that increased and confidently reproduced failure")
     }
     if (status === "rejected" && this.#hasCausalIntervention(evidence)) {
       throw new Error("Rejection cannot cite an intervention that confirmed the prediction")
@@ -110,8 +114,8 @@ export class InvestigationLedger {
     if (confirmed.length !== 1 || confirmed[0]?.id !== this.#conclusionHypothesisId) {
       throw new Error("Investigator must conclude with exactly one confirmed hypothesis")
     }
-    if (!this.#hypotheses.some((hypothesis) => hypothesis.status === "rejected")) {
-      throw new Error("Investigator did not reject a competing hypothesis")
+    if (this.#hypotheses.some((hypothesis) => hypothesis.status === "proposed")) {
+      throw new Error("Investigator did not assess every competing hypothesis")
     }
     return investigationReportSchema.parse({
       test,
@@ -157,8 +161,7 @@ export class InvestigationLedger {
     )
     return evidence.some((entry) =>
       entry.condition.kind !== "baseline"
-      && entry.result.confirmed
-      && entry.result.lowerBound80 > baselineUpperBound)
+      && hasConfirmedCausalSignal(entry.result, baselineUpperBound))
   }
 
   #describesHypothesis(summary: string, statement: string): boolean {

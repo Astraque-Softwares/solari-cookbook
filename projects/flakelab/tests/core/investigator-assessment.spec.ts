@@ -148,6 +148,79 @@ test("confirmed evidence constructs the assessment without model adjudication", 
   ).conclusionEvidenceIds).toEqual(["E3"])
 })
 
+test("discovery evidence anchors one primary hypothesis when another intervention is causal", () => {
+  const state = investigationState()
+  state.evidence[1].result = failingResult
+
+  const grounded = groundAssessmentInEvidence(
+    state,
+    undefined,
+    { delayMs: 125, kind: "network-delay" },
+  )
+
+  expect(grounded.conclusionHypothesisId).toBe("H1")
+  expect(grounded.assessments).toEqual([
+    expect.objectContaining({ hypothesisId: "H1", status: "confirmed" }),
+    expect.objectContaining({ hypothesisId: "H2", status: "corroborating" }),
+  ])
+  applyInvestigationAssessment(state, grounded)
+  const report = state.ledger.buildReport(
+    "tests/checkout.spec.ts",
+    "test-model",
+    ["tests/checkout.spec.ts"],
+    { estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 },
+  )
+  expect(report.conclusionHypothesisId).toBe("H1")
+  expect(report.hypotheses[1]).toEqual(expect.objectContaining({
+    evidenceExperimentIds: ["E2"],
+    status: "corroborating",
+  }))
+})
+
+test("paired discovery evidence remains causal when a later baseline is noisy", () => {
+  const state = investigationState()
+  state.evidence[0].result = {
+    ...passingResult,
+    failed: 2,
+    failureRate: 0.5,
+    lowerBound80: 0.2302,
+    passed: 2,
+    upperBound80: 0.7698,
+  }
+  state.evidence[2].result = {
+    ...failingResult,
+    causalEffect: {
+      controlFailures: 0,
+      controlRate: 0,
+      controlUpperBound80: 0.2911,
+      failureRateIncrease: 1,
+      signature: "checkout-timeout",
+      treatmentFailures: 4,
+      treatmentLowerBound80: 0.7089,
+      treatmentRate: 1,
+    },
+  }
+
+  const grounded = groundAssessmentInEvidence(
+    state,
+    undefined,
+    { delayMs: 125, kind: "network-delay" },
+  )
+
+  expect(grounded.conclusionHypothesisId).toBe("H1")
+  expect(grounded.assessments).toEqual([
+    expect.objectContaining({ hypothesisId: "H1", status: "confirmed" }),
+    expect.objectContaining({ hypothesisId: "H2", status: "rejected" }),
+  ])
+  applyInvestigationAssessment(state, grounded)
+  expect(state.ledger.buildReport(
+    "tests/checkout.spec.ts",
+    "test-model",
+    ["tests/checkout.spec.ts"],
+    { estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 },
+  ).conclusionEvidenceIds).toEqual(["E3"])
+})
+
 test("errored experiments stop before model assessment", () => {
   const state = investigationState()
   state.evidence[2].result = {

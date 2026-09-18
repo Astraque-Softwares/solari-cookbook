@@ -21,6 +21,7 @@ import type {
 import type { DiagnosisStage } from "../diagnosis/schema.js"
 import { formatDiagnosisSummary } from "../diagnosis/summary.js"
 import type { RequiredExperimentEvidence } from "../investigator/agent.js"
+import { InvestigationFailure } from "../investigator/failure.js"
 import {
   experimentConditionSchema,
   experimentResultSchema,
@@ -184,17 +185,58 @@ async function readRequiredExperimentEvidence(
   return { condition: artifact.trigger, result: artifact.triggerResult }
 }
 
+function failedInvestigationExecutions(
+  error: InvestigationFailure,
+  requiredEvidence: RequiredExperimentEvidence | undefined,
+): number {
+  const measured = error.partial.experiments.reduce(
+    (total, experiment) => total + experiment.result.trials,
+    0,
+  )
+  return Math.max(0, measured - (requiredEvidence?.result.trials ?? 0))
+}
+
+function recordInvestigationFailure(
+  context: DiagnosisContext,
+  error: Error,
+  requiredEvidence: RequiredExperimentEvidence | undefined,
+  startedAt: number,
+): void {
+  if (!(error instanceof InvestigationFailure)) {
+    addDiagnosisUsage(context, {
+      elapsedMilliseconds: Date.now() - startedAt,
+      executions: 0,
+    })
+    return
+  }
+  addDiagnosisUsage(context, {
+    aiEstimatedCostUsd: error.partial.usage.estimatedCostUsd,
+    aiInputTokens: error.partial.usage.inputTokens,
+    aiOutputTokens: error.partial.usage.outputTokens,
+    elapsedMilliseconds: Date.now() - startedAt,
+    executions: failedInvestigationExecutions(error, requiredEvidence),
+  })
+}
+
+function requiredEvidencePattern(
+  evidence: RequiredExperimentEvidence | undefined,
+): string | undefined {
+  if (!evidence || !("pattern" in evidence.condition)) return undefined
+  return typeof evidence.condition.pattern === "string"
+    ? evidence.condition.pattern
+    : undefined
+}
+
 async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
   const { projectRoot, target, values } = context
   const { investigate } = await import("./investigate.js")
   const startedAt = Date.now()
   const requiredEvidence = await readRequiredExperimentEvidence(context)
-  const evidencePattern = requiredEvidence && "pattern" in requiredEvidence.condition
-    && typeof requiredEvidence.condition.pattern === "string"
-    ? requiredEvidence.condition.pattern
-    : undefined
+  const evidencePattern = requiredEvidencePattern(requiredEvidence)
   if (!context.repository) throw new Error("Diagnosis repository profile is missing")
-  const report = await investigate(target ?? "", {
+  let report
+  try {
+    report = await investigate(target ?? "", {
     concurrency: values.concurrency,
     "max-cost": values["max-cost"],
     "max-delay": values["max-delay"],
@@ -209,7 +251,12 @@ async function runInvestigationStage(context: DiagnosisContext): Promise<void> {
     report: values.evidence,
     seed: values.seed,
     trials: values.trials,
-  }, requiredEvidence, context.repository)
+    }, requiredEvidence, context.repository)
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error("Investigation failed")
+    recordInvestigationFailure(context, failure, requiredEvidence, startedAt)
+    throw error
+  }
   context.checkpoint.artifacts.evidence = portableProjectPath(projectRoot, values.evidence)
   addDiagnosisUsage(context, {
     aiEstimatedCostUsd: report.usage.estimatedCostUsd,

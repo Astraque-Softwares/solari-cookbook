@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 
 import { InvestigationLedger } from "./ledger.js"
@@ -7,10 +8,11 @@ import {
   schemaCorrectionPrompt,
 } from "./generation.js"
 import type { ExperimentEvidence, Hypothesis } from "./schema.js"
+import { hasConfirmedCausalSignal } from "./causality.js"
 
 const assessmentItemSchema = z.object({
   hypothesisId: z.string().regex(/^H\d+$/u),
-  status: z.enum(["rejected", "confirmed"]),
+  status: z.enum(["rejected", "confirmed", "corroborating"]),
   explanation: z.string().min(8).max(1_000),
 })
 
@@ -79,6 +81,7 @@ export interface AssessmentState {
 export function groundAssessmentInEvidence(
   state: AssessmentState,
   assessment?: InvestigationAssessment,
+  preferredCondition?: ExperimentEvidence["condition"],
 ): InvestigationAssessment {
   if (assessment) {
     const assessedIds = new Set(assessment.assessments.map((item) => item.hypothesisId))
@@ -87,19 +90,12 @@ export function groundAssessmentInEvidence(
     }
   }
   const baseline = baselineEvidence(state.evidence)
-  const confirmed = state.hypotheses.filter((hypothesis) => state.evidence.some((entry) =>
-    entry.hypothesisId === hypothesis.id && isCausal(entry, baseline)))
-  if (confirmed.length !== 1) {
-    throw new Error("Investigation must produce exactly one causally confirmed hypothesis")
-  }
-  const confirmedHypothesis = confirmed[0]
+  const confirmedHypothesis = primaryHypothesis(state, baseline, preferredCondition)
   return {
     assessments: state.hypotheses.map((hypothesis) => {
-      const status = hypothesis.id === confirmedHypothesis.id ? "confirmed" : "rejected"
+      const status = groundedStatus(state, baseline, hypothesis, confirmedHypothesis)
       return {
-        explanation: status === "confirmed"
-          ? `Controlled evidence confirmed this prediction: ${hypothesis.prediction}`
-          : `Controlled evidence did not confirm this prediction: ${hypothesis.prediction}`,
+        explanation: groundedExplanation(status, hypothesis),
         hypothesisId: hypothesis.id,
         status,
       }
@@ -107,6 +103,76 @@ export function groundAssessmentInEvidence(
     conclusion: `Controlled evidence confirms this causal hypothesis: ${confirmedHypothesis.statement}`,
     conclusionHypothesisId: confirmedHypothesis.id,
   }
+}
+
+function causalEvidence(
+  state: AssessmentState,
+  baseline: ExperimentEvidence,
+  hypothesis: Hypothesis,
+): ExperimentEvidence[] {
+  return state.evidence.filter((entry) =>
+    entry.hypothesisId === hypothesis.id && isCausal(entry, baseline))
+}
+
+function preferredHypothesis(
+  state: AssessmentState,
+  baseline: ExperimentEvidence,
+  preferredCondition: ExperimentEvidence["condition"],
+): Hypothesis {
+  const evidence = state.evidence.find((entry) =>
+    entry.condition.kind !== "baseline"
+    && isDeepStrictEqual(entry.condition, preferredCondition))
+  if (!evidence || !isCausal(evidence, baseline)) {
+    throw new Error("The discovery-confirmed intervention was not preserved as causal evidence")
+  }
+  const hypothesis = state.hypotheses.find((entry) => entry.id === evidence.hypothesisId)
+  if (!hypothesis) {
+    throw new Error("The discovery-confirmed intervention is not assigned to a hypothesis")
+  }
+  return hypothesis
+}
+
+function primaryHypothesis(
+  state: AssessmentState,
+  baseline: ExperimentEvidence,
+  preferredCondition?: ExperimentEvidence["condition"],
+): Hypothesis {
+  if (preferredCondition) {
+    return preferredHypothesis(state, baseline, preferredCondition)
+  }
+  const confirmed = state.hypotheses.filter((hypothesis) =>
+    causalEvidence(state, baseline, hypothesis).length > 0)
+  if (confirmed.length !== 1) {
+    throw new Error(
+      `Investigation requires one primary causal hypothesis; measured ${confirmed.length}`,
+    )
+  }
+  return confirmed[0]
+}
+
+function groundedStatus(
+  state: AssessmentState,
+  baseline: ExperimentEvidence,
+  hypothesis: Hypothesis,
+  primary: Hypothesis,
+): InvestigationAssessment["assessments"][number]["status"] {
+  if (hypothesis.id === primary.id) return "confirmed"
+  return causalEvidence(state, baseline, hypothesis).length > 0
+    ? "corroborating"
+    : "rejected"
+}
+
+function groundedExplanation(
+  status: InvestigationAssessment["assessments"][number]["status"],
+  hypothesis: Hypothesis,
+): string {
+  if (status === "confirmed") {
+    return `Controlled discovery evidence confirmed this primary prediction: ${hypothesis.prediction}`
+  }
+  if (status === "corroborating") {
+    return `Additional controlled evidence also reproduced this prediction: ${hypothesis.prediction}`
+  }
+  return `Controlled evidence did not confirm this prediction: ${hypothesis.prediction}`
 }
 
 function completedTrials(entry: ExperimentEvidence): number {
@@ -143,20 +209,19 @@ function baselineEvidence(evidence: ExperimentEvidence[]): ExperimentEvidence {
 
 function isCausal(entry: ExperimentEvidence, baseline: ExperimentEvidence): boolean {
   return entry.condition.kind !== "baseline"
-    && entry.result.confirmed
-    && entry.result.lowerBound80 > baseline.result.upperBound80
+    && hasConfirmedCausalSignal(entry.result, baseline.result.upperBound80)
 }
 
 function evidenceIdsForStatus(
   evidence: ExperimentEvidence[],
   hypothesisId: string,
-  status: "rejected" | "confirmed",
+  status: InvestigationAssessment["assessments"][number]["status"],
   baseline: ExperimentEvidence,
 ): string[] {
   const interventions = evidence.filter((entry) =>
     entry.hypothesisId === hypothesisId && entry.condition.kind !== "baseline")
   const matching = interventions.filter((entry) =>
-    status === "confirmed" ? isCausal(entry, baseline) : !isCausal(entry, baseline))
+    status === "rejected" ? !isCausal(entry, baseline) : isCausal(entry, baseline))
   if (matching.length === 0) {
     throw new Error(`Hypothesis ${hypothesisId} cannot be ${status} by the measured evidence`)
   }

@@ -13,6 +13,12 @@ batch, then assess the resulting evidence.
 FlakeLab executes the trials and calculates confidence. **The model cannot declare causality
 by itself.**
 
+In the `diagnose` pipeline, the trigger confirmed during discovery anchors the primary
+hypothesis. A second intervention may corroborate the causal mechanism; it is reported as
+corroborating evidence rather than forcing a false rejection or aborting the investigation.
+Completed experiments are printed as they finish. If post-experiment assessment fails, FlakeLab
+retains a `.partial.json` artifact with the measured evidence and provider usage.
+
 ## Options
 
 | Option | Default | Meaning |

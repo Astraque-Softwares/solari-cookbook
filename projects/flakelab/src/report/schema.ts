@@ -60,7 +60,7 @@ export const evidenceReportSchema = z.object({
   hypotheses: z.array(z.object({
     id: z.string().min(1),
     statement: z.string().min(1).max(500),
-    status: z.enum(["proposed", "rejected", "confirmed"]),
+    status: z.enum(["proposed", "rejected", "confirmed", "corroborating"]),
     explanation: z.string().max(1_000),
     evidenceExperimentIds: z.array(z.string().min(1)),
   })),

@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises"
 import { relative, resolve } from "node:path"
+import { z } from "zod"
 
 import { buildDiscoveryBudget } from "../diagnosis/discovery-budget.js"
 import type { DiagnosisContext } from "../diagnosis/run-state.js"
@@ -21,6 +23,16 @@ type RestartDiagnosis = (
   values: DiagnoseOptions,
   repositoryRestart: number,
 ) => Promise<void>
+
+const discoveryRelevanceSchema = z.object({
+  trigger: z.object({
+    pattern: z.string().optional(),
+  }),
+  triggerResult: z.object({
+    dominantErrorReason: z.string().optional(),
+    dominantFailureReason: z.string().optional(),
+  }),
+})
 
 async function continueApprovedProof(context: DiagnosisContext): Promise<void> {
   const { continueSavedDiagnosis } = await import("./diagnose.js")
@@ -67,6 +79,7 @@ async function sourceSuggestions(context: DiagnosisContext): Promise<{
   const sources = await discoverRankedRepairSourceCandidates(
     context.repository.workspaceRoot,
     workspaceTest,
+    await discoveryRelevance(context),
   )
   return sources.map((source) => ({
     path: relative(
@@ -75,6 +88,23 @@ async function sourceSuggestions(context: DiagnosisContext): Promise<{
     ).replaceAll("\\", "/"),
     reason: source.reason,
   }))
+}
+
+async function discoveryRelevance(context: DiagnosisContext): Promise<string> {
+  const discovery = context.checkpoint.artifacts.discovery
+  if (!discovery) return ""
+  try {
+    const evidence = discoveryRelevanceSchema.parse(JSON.parse(
+      await readFile(resolve(context.projectRoot, discovery), "utf8"),
+    ))
+    return [
+      evidence.trigger.pattern,
+      evidence.triggerResult.dominantFailureReason,
+      evidence.triggerResult.dominantErrorReason,
+    ].filter((value) => value !== undefined).join("\n")
+  } catch {
+    return ""
+  }
 }
 
 async function runApprovedLocalDiscovery(context: DiagnosisContext): Promise<boolean> {

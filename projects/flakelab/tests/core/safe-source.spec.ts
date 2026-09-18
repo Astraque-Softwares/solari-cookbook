@@ -5,6 +5,7 @@ import { resolve } from "node:path"
 import { tmpdir } from "node:os"
 
 import {
+  discoverRankedRepairSourceCandidates,
   discoverRepairSourceCandidates,
   readSafeRepairContext,
   readSafeTestContext,
@@ -233,6 +234,49 @@ test("black-box tests rank application source without repository-specific rules"
     const candidates = await discoverRepairSourceCandidates(root, "e2e/products.spec.ts:1")
 
     expect(candidates[0]).toBe("packages/shop/data/src/hooks/use-products.ts")
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("discovery evidence outranks unrelated test vocabulary", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "flakelab-evidence-ranking-"))
+  try {
+    await mkdir(resolve(root, "e2e"), { recursive: true })
+    await mkdir(resolve(root, "src/components/accounts"), { recursive: true })
+    await mkdir(resolve(root, "src/platform/sqlite"), { recursive: true })
+    await mkdir(resolve(root, "packages/core/src/platform/fs"), { recursive: true })
+    await writeFile(
+      resolve(root, "e2e/onboarding.test.ts"),
+      "test('creates account budget', async () => navigation.goToAccountPage('All accounts'))\n",
+      "utf8",
+    )
+    await writeFile(
+      resolve(root, "src/components/accounts/Account.tsx"),
+      "export const Account = () => 'account budget navigation'\n",
+      "utf8",
+    )
+    await writeFile(
+      resolve(root, "src/platform/sqlite/index.ts"),
+      "export const openDatabase = () => 'sqlite database'\n",
+      "utf8",
+    )
+    await writeFile(
+      resolve(root, "packages/core/src/platform/fs/index.ts"),
+      "export const bundledDatabasePath = '/default-db.sqlite'\n",
+      "utf8",
+    )
+
+    const candidates = await discoverRankedRepairSourceCandidates(
+      root,
+      "e2e/onboarding.test.ts:1",
+      '{"trigger":{"pattern":"**/data/default-db.sqlite*"}}',
+    )
+
+    expect(candidates[0]).toEqual({
+      path: "packages/core/src/platform/fs/index.ts",
+      reason: "Matched the discovered trigger or observed failure evidence.",
+    })
   } finally {
     await rm(root, { force: true, recursive: true })
   }

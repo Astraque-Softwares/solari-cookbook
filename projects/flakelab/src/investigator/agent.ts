@@ -14,7 +14,11 @@ import {
   validateExperimentEvidence,
 } from "./assessment.js"
 import { InvestigationBudget } from "./budget.js"
-import { RecoverableGenerationError } from "./generation.js"
+import {
+  type ModelGenerationUsage,
+  RecoverableGenerationError,
+} from "./generation.js"
+import { InvestigationFailure } from "./failure.js"
 import { InvestigationLedger } from "./ledger.js"
 import {
   generateValidInvestigationPlan,
@@ -43,16 +47,26 @@ export interface RequiredExperimentEvidence {
   result: ExperimentResult
 }
 
+export interface InvestigationExperimentNotice {
+  condition: ExperimentCondition
+  result: ExperimentResult
+  reused: boolean
+}
+
 export async function collectInvestigationResults(
   plan: InvestigationPlan,
   requiredEvidence: RequiredExperimentEvidence | undefined,
   evaluate: (condition: ExperimentCondition) => Promise<ExperimentResult>,
+  onExperiment?: (notice: InvestigationExperimentNotice) => void,
 ): Promise<ExperimentResult[]> {
-  return Promise.all(plan.experiments.map(({ condition }) => {
+  return Promise.all(plan.experiments.map(async ({ condition }) => {
     if (requiredEvidence && sameExperimentCondition(condition, requiredEvidence.condition)) {
-      return Promise.resolve(requiredEvidence.result)
+      onExperiment?.({ condition, result: requiredEvidence.result, reused: true })
+      return requiredEvidence.result
     }
-    return evaluate(condition)
+    const result = await evaluate(condition)
+    onExperiment?.({ condition, result, reused: false })
+    return result
   }))
 }
 
@@ -69,6 +83,7 @@ export interface InvestigatorOptions {
   minimumFailureRate: number
   model: LanguageModel
   modelId: string
+  onExperiment?: (notice: InvestigationExperimentNotice) => void
   outputTokenLimit: number
   outputUsdPerMillion: number
   pattern: string
@@ -178,6 +193,129 @@ function createLedgerState(plan: InvestigationPlan, results: ExperimentResult[])
   return { evidence, hypotheses, ledger }
 }
 
+type AssessmentGenerator = (
+  prompt: string,
+  temperature: number,
+) => Promise<AssessmentGeneration>
+
+interface GeneratedAssessmentOptions {
+  generate: AssessmentGenerator
+  ledgerState: object
+  maxSteps: number
+  modelSteps: number
+  plan: InvestigationPlan
+  results: ExperimentResult[]
+  state: LedgerState
+}
+
+interface AssessmentOutcome {
+  attempts: ModelGenerationUsage[]
+  state: LedgerState
+}
+
+async function applyGeneratedAssessment(
+  options: GeneratedAssessmentOptions,
+): Promise<AssessmentOutcome> {
+  const assessmentResult = await generateValidInvestigationAssessment({
+    generate: options.generate,
+    maxAttempts: Math.min(2, options.maxSteps - options.modelSteps),
+    initialPrompt: assessmentPrompt(options.ledgerState),
+  })
+  const modelSteps = options.modelSteps + assessmentResult.attempts.length
+  try {
+    applyInvestigationAssessment(
+      options.state,
+      groundAssessmentInEvidence(options.state, assessmentResult.assessment),
+    )
+    return { attempts: assessmentResult.attempts, state: options.state }
+  } catch (error) {
+    if (modelSteps >= options.maxSteps) throw error
+    const validationError = error instanceof Error
+      ? error.message
+      : "invalid evidence assessment"
+    const repairResult = await generateValidInvestigationAssessment({
+      generate: options.generate,
+      initialPrompt: assessmentRepairPrompt(
+        options.ledgerState,
+        assessmentResult.assessment,
+        validationError,
+      ),
+      temperature: 0,
+      maxAttempts: Math.min(2, options.maxSteps - modelSteps),
+    })
+    const state = createLedgerState(options.plan, options.results)
+    applyInvestigationAssessment(
+      state,
+      groundAssessmentInEvidence(state, repairResult.assessment),
+    )
+    return {
+      attempts: [...assessmentResult.attempts, ...repairResult.attempts],
+      state,
+    }
+  }
+}
+
+interface EvidenceAssessmentOptions {
+  generate: AssessmentGenerator
+  investigator: InvestigatorOptions
+  ledgerState: object
+  modelSteps: number
+  plan: InvestigationPlan
+  planningInputTokens: number
+  planningOutputTokens: number
+  results: ExperimentResult[]
+  state: LedgerState
+}
+
+async function assessEvidence(options: EvidenceAssessmentOptions): Promise<AssessmentOutcome> {
+  let state = options.state
+  let attempts: ModelGenerationUsage[] = []
+  try {
+    if (options.investigator.requiredEvidence) {
+      applyInvestigationAssessment(
+        state,
+        groundAssessmentInEvidence(
+          state,
+          undefined,
+          options.investigator.requiredEvidence.condition,
+        ),
+      )
+    } else {
+      const outcome = await applyGeneratedAssessment({
+        generate: options.generate,
+        ledgerState: options.ledgerState,
+        maxSteps: options.investigator.maxSteps,
+        modelSteps: options.modelSteps,
+        plan: options.plan,
+        results: options.results,
+        state,
+      })
+      attempts = outcome.attempts
+      state = outcome.state
+    }
+    return { attempts, state }
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error("Evidence assessment failed")
+    const inputTokens = options.planningInputTokens + attempts.reduce(
+      (total, usage) => total + usage.inputTokens,
+      0,
+    )
+    const outputTokens = options.planningOutputTokens + attempts.reduce(
+      (total, usage) => total + usage.outputTokens,
+      0,
+    )
+    throw new InvestigationFailure(error.message, {
+      experiments: state.evidence,
+      hypotheses: state.hypotheses,
+      usage: {
+        estimatedCostUsd: estimatedCost(inputTokens, outputTokens, options.investigator),
+        inputTokens,
+        outputTokens,
+      },
+    }, error)
+  }
+}
+
 export async function runInvestigation(options: InvestigatorOptions): Promise<InvestigationReport> {
   if (options.maxSteps < 2) {
     throw new Error("Investigation requires a budget of two model steps")
@@ -232,7 +370,7 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
     },
   })
   const plan = planResult.plan
-  let modelSteps = planResult.attempts.length
+  const modelSteps = planResult.attempts.length
   const planningInputTokens = planResult.attempts.reduce(
     (total, usage) => total + usage.inputTokens,
     0,
@@ -257,6 +395,7 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
         trials: options.trialsPerExperiment,
       })
     },
+    options.onExperiment,
   )
   let state = createLedgerState(plan, results)
   validateExperimentEvidence(state.evidence)
@@ -294,48 +433,19 @@ export async function runInvestigation(options: InvestigatorOptions): Promise<In
       throw error
     }
   }
-  const assessmentAttempts: AssessmentGeneration["usage"][] = []
-  if (options.requiredEvidence) {
-    applyInvestigationAssessment(
-      state,
-      groundAssessmentInEvidence(state),
-    )
-  } else {
-    const assessmentResult = await generateValidInvestigationAssessment({
-      generate: generateAssessment,
-      initialPrompt: assessmentPrompt(ledgerState),
-      maxAttempts: Math.min(2, options.maxSteps - modelSteps),
-    })
-    modelSteps += assessmentResult.attempts.length
-    assessmentAttempts.push(...assessmentResult.attempts)
-    try {
-      applyInvestigationAssessment(
-        state,
-        groundAssessmentInEvidence(state, assessmentResult.assessment),
-      )
-    } catch (error) {
-      if (modelSteps >= options.maxSteps) {
-        throw error
-      }
-      const validationError = error instanceof Error ? error.message : "invalid evidence assessment"
-      const repairResult = await generateValidInvestigationAssessment({
-        generate: generateAssessment,
-        initialPrompt: assessmentRepairPrompt(
-          ledgerState,
-          assessmentResult.assessment,
-          validationError,
-        ),
-        temperature: 0,
-        maxAttempts: Math.min(2, options.maxSteps - modelSteps),
-      })
-      assessmentAttempts.push(...repairResult.attempts)
-      state = createLedgerState(plan, results)
-      applyInvestigationAssessment(
-        state,
-        groundAssessmentInEvidence(state, repairResult.assessment),
-      )
-    }
-  }
+  const assessment = await assessEvidence({
+    generate: generateAssessment,
+    investigator: options,
+    ledgerState,
+    modelSteps,
+    plan,
+    planningInputTokens,
+    planningOutputTokens,
+    results,
+    state,
+  })
+  const assessmentAttempts = assessment.attempts
+  state = assessment.state
 
   const inputTokens = planningInputTokens + assessmentAttempts.reduce(
     (total, usage) => total + usage.inputTokens,

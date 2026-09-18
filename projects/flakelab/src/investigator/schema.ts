@@ -136,7 +136,7 @@ export const hypothesisSchema = z.object({
   id: z.string().regex(/^H\d+$/u),
   statement: z.string().min(8).max(500),
   prediction: z.string().min(8).max(500),
-  status: z.enum(["proposed", "rejected", "confirmed"]),
+  status: z.enum(["proposed", "rejected", "confirmed", "corroborating"]),
   evidenceExperimentIds: z.array(z.string().regex(/^E\d+$/u)),
   explanation: z.string().max(1_000),
 })

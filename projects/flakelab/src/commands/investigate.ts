@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 
 import { runInvestigation } from "../investigator/agent.js"
 import type { RequiredExperimentEvidence } from "../investigator/agent.js"
+import { InvestigationFailure } from "../investigator/failure.js"
 import type { InvestigationReport } from "../investigator/schema.js"
 import {
   createGroqInvestigatorModel,
@@ -41,6 +42,16 @@ function evidenceRequestPattern(
   return typeof requiredEvidence.condition.pattern === "string"
     ? requiredEvidence.condition.pattern
     : undefined
+}
+
+function experimentProgress(
+  condition: { kind: string },
+  failed: number,
+  trials: number,
+  reused: boolean,
+): string {
+  const source = reused ? "discovery evidence" : `${trials} local trials`
+  return `${condition.kind} · ${failed}/${trials} failed · ${source}`
 }
 
 async function investigationRequestPattern(
@@ -131,6 +142,12 @@ export async function investigate(
     minimumFailureRate: rateOption(values["min-rate"]),
     model: createGroqInvestigatorModel(apiKey, values.model),
     modelId: values.model,
+    onExperiment: ({ condition, result, reused }) => progress.step(experimentProgress(
+      condition,
+      result.failed,
+      result.trials,
+      reused,
+    )),
     outputTokenLimit: 512,
     outputUsdPerMillion: QWEN_OUTPUT_USD_PER_MILLION,
     pattern: requestPattern,
@@ -140,6 +157,15 @@ export async function investigate(
     signal,
     test: selector,
     trialsPerExperiment: integerOption(values.trials, "trials"),
+  }).catch(async (error) => {
+    if (error instanceof InvestigationFailure) {
+      const partialPath = resolve(projectRoot, values.report.replace(/\.json$/u, ".partial.json"))
+      await writeFile(partialPath, `${JSON.stringify(error.partial, null, 2)}\n`, {
+        encoding: "utf8",
+      })
+      progress.step(`partial evidence saved · ${partialPath}`)
+    }
+    throw error
   }))
   progress.done(
     `${formatCount(report.experiments.length, "experiment")}`

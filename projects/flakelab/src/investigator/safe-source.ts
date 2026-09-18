@@ -284,8 +284,9 @@ async function selectedTestFiles(projectRoot: string, selector: string): Promise
 export async function discoverRepairSourceCandidates(
   projectRoot: string,
   selector: string,
+  relevanceText = "",
 ): Promise<string[]> {
-  return (await discoverRankedRepairSourceCandidates(projectRoot, selector))
+  return (await discoverRankedRepairSourceCandidates(projectRoot, selector, relevanceText))
     .map((candidate) => candidate.path)
 }
 
@@ -294,9 +295,24 @@ export interface RepairSourceCandidate {
   reason: string
 }
 
+function sourceCandidateReason(
+  path: string,
+  evidencePaths: Set<string>,
+  direct: string[],
+): string {
+  if (evidencePaths.has(path)) {
+    return "Matched the discovered trigger or observed failure evidence."
+  }
+  if (direct.includes(path)) {
+    return "Imported by the selected test or its local support graph."
+  }
+  return "Matched route, component, or identifier clues from the selected test."
+}
+
 export async function discoverRankedRepairSourceCandidates(
   projectRoot: string,
   selector: string,
+  relevanceText = "",
 ): Promise<RepairSourceCandidate[]> {
   const tests = await selectedTestFiles(projectRoot, selector)
   const selectedTests = new Set(tests.map((path) => relative(projectRoot, path)))
@@ -310,19 +326,27 @@ export async function discoverRankedRepairSourceCandidates(
     }
   }
   const direct = [...candidates].sort((left, right) => left.localeCompare(right))
-  if (direct.length > 0 && direct.some((path) => !isTestSupportPath(path))) {
+  if (relevanceText.length === 0
+    && direct.length > 0
+    && direct.some((path) => !isTestSupportPath(path))) {
     return direct.slice(0, MAX_RANKED_SOURCE_FILES).map((path) => ({
       path,
       reason: "Imported by the selected test or its local support graph.",
     }))
   }
-  const ranked = await rankedApplicationSources(projectRoot, tests, selectedTests)
-  const combined = [...new Set([...ranked, ...direct])].slice(0, MAX_RANKED_SOURCE_FILES)
+  const ranked = await rankedApplicationSources(
+    projectRoot,
+    tests,
+    selectedTests,
+    relevanceText,
+  )
+  const rankedPaths = ranked.map((entry) => entry.path)
+  const evidencePaths = new Set(ranked.filter((entry) => entry.evidenceMatch)
+    .map((entry) => entry.path))
+  const combined = [...new Set([...rankedPaths, ...direct])].slice(0, MAX_RANKED_SOURCE_FILES)
   return combined.map((path) => ({
     path,
-    reason: direct.includes(path)
-      ? "Imported by the selected test or its local support graph."
-      : "Matched route, component, or identifier clues from the selected test.",
+    reason: sourceCandidateReason(path, evidencePaths, direct),
   }))
 }
 
@@ -350,7 +374,23 @@ function sourceClues(content: string): string[] {
   return [...clues]
 }
 
-function sourceScore(path: string, content: string, clues: string[]): number {
+function resourceTokens(content: string): string[] {
+  const tokens = content.toLowerCase().split(/[^a-z0-9._-]+/u)
+  return [...new Set(tokens.filter((token) => {
+    const extensionSeparator = token.lastIndexOf(".")
+    return extensionSeparator >= 2 && token.length - extensionSeparator >= 3
+  }))]
+}
+
+function resourceClues(tokens: string[]): string[] {
+  return sourceClues(tokens.join(" "))
+}
+
+function platformVariantPenalty(path: string): number {
+  return /\.(?:api|electron|native|server)\.(?:js|jsx|mjs|ts|tsx)$/iu.test(path) ? 10 : 0
+}
+
+function clueScore(path: string, content: string, clues: string[]): number {
   const normalizedPath = path.toLowerCase()
   const name = basename(normalizedPath, extname(normalizedPath))
   const normalizedContent = content.toLowerCase()
@@ -359,6 +399,28 @@ function sourceScore(path: string, content: string, clues: string[]): number {
     if (normalizedPath.includes(clue)) return score + 6
     return normalizedContent.includes(clue) ? score + 1 : score
   }, 0)
+}
+
+function sourceScore(
+  path: string,
+  content: string,
+  testClues: string[],
+  evidenceClues: string[],
+  exactResourceClues: string[],
+  exactResourceTokens: string[],
+): { evidenceMatch: boolean; score: number } {
+  const evidenceScore = clueScore(path, content, evidenceClues)
+  const resourceScore = clueScore(path, content, exactResourceClues)
+  const searchable = `${path}\n${content}`.toLowerCase()
+  const exactResourceScore = exactResourceTokens.filter((token) => searchable.includes(token)).length
+  return {
+    evidenceMatch: evidenceScore > 0 || resourceScore > 0 || exactResourceScore > 0,
+    score: clueScore(path, content, testClues)
+      + evidenceScore * 20
+      + resourceScore * 500
+      + exactResourceScore * 5_000
+      - platformVariantPenalty(path),
+  }
 }
 
 async function selectedClues(tests: string[]): Promise<string[]> {
@@ -370,16 +432,20 @@ function eligibleApplicationSource(path: string, selectedTests: Set<string>): bo
   const normalized = path.replaceAll("\\", "/")
   if (selectedTests.has(normalized) || TEST_FILE.test(normalized)) return false
   if (!ALLOWED_EXTENSIONS.has(extname(normalized).toLowerCase())) return false
-  return !/(?:^|\/)(?:dist|build|coverage|generated|node_modules|\.flakelab)(?:\/|$)/u.test(normalized)
+  return !/(?:^|\/)(?:dist|build|coverage|generated|node_modules|\.flakelab|\.github)(?:\/|$)/u.test(normalized)
 }
 
 async function rankedApplicationSources(
   projectRoot: string,
   tests: string[],
   selectedTests: Set<string>,
-): Promise<string[]> {
-  const clues = await selectedClues(tests)
-  const scored: Array<{ path: string; score: number }> = []
+  relevanceText: string,
+): Promise<Array<{ evidenceMatch: boolean; path: string; score: number }>> {
+  const testClues = await selectedClues(tests)
+  const evidenceClues = sourceClues(relevanceText)
+  const exactResourceTokens = resourceTokens(relevanceText)
+  const exactResourceClues = resourceClues(exactResourceTokens)
+  const scored: Array<{ evidenceMatch: boolean; path: string; score: number }> = []
   for (const path of await projectFiles(projectRoot)) {
     const normalized = path.replaceAll("\\", "/")
     if (!eligibleApplicationSource(normalized, selectedTests)) continue
@@ -387,15 +453,20 @@ async function rankedApplicationSources(
       const details = await stat(resolve(projectRoot, path))
       if (!details.isFile() || details.size > MAX_APPROVED_SOURCE_BYTES) continue
       const content = await readFile(resolve(projectRoot, path), "utf8")
-      const score = sourceScore(normalized, content, clues)
-      if (score > 0) scored.push({ path: normalized, score })
+      const rank = sourceScore(
+        normalized,
+        content,
+        testClues,
+        evidenceClues,
+        exactResourceClues,
+        exactResourceTokens,
+      )
+      if (rank.score > 0) scored.push({ path: normalized, ...rank })
     } catch {
       // The inventory may change while suggestions are ranked; missing files are ignored.
     }
   }
   const ranked = [...scored]
   ranked.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
-  return ranked
-    .slice(0, MAX_RANKED_SOURCE_FILES)
-    .map((entry) => entry.path)
+  return ranked.slice(0, MAX_RANKED_SOURCE_FILES)
 }

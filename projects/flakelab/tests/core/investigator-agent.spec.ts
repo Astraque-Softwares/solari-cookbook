@@ -63,6 +63,7 @@ test("investigation reuses the confirmed discovery result without rerunning its 
     result: confirmedResult,
   }
   const evaluated: ExperimentCondition[] = []
+  const notices: Array<{ kind: string; reused: boolean }> = []
 
   const results = await collectInvestigationResults(
     plan,
@@ -71,6 +72,7 @@ test("investigation reuses the confirmed discovery result without rerunning its 
       evaluated.push(condition)
       return Promise.resolve(passingResult)
     },
+    ({ condition, reused }) => notices.push({ kind: condition.kind, reused }),
   )
 
   expect(results).toEqual([passingResult, confirmedResult, passingResult])
@@ -78,4 +80,10 @@ test("investigation reuses the confirmed discovery result without rerunning its 
     { kind: "baseline" },
     { kind: "request-failure", statusCode: 503 },
   ])
+  expect(notices).toHaveLength(3)
+  expect(notices).toEqual(expect.arrayContaining([
+    { kind: "baseline", reused: false },
+    { kind: "reduced-motion", reused: true },
+    { kind: "request-failure", reused: false },
+  ]))
 })
