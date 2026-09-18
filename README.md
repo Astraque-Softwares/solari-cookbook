@@ -71,6 +71,7 @@ PowerShell, Bash/zsh, `.env`, CI, cleanup, and rotation instructions.
 
 ## Explore
 
+- [Actual Budget demonstration repository](https://github.com/kelvinguchu/flakelab-actual-budget-demo)
 - [Detailed package guide](projects/flakelab/README.md)
 - [90-second demonstration](docs/DEMO.md)
 - [Architecture](docs/ARCHITECTURE.md)

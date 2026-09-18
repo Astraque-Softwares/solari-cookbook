@@ -21,6 +21,14 @@ npx flakelab@latest tests/checkout.spec.ts --runs 20 --verbose
 npx flakelab@latest scan tests/checkout.spec.ts --runs 20 --json
 ```
 
+For an end-to-end demonstration in a real monorepo, use the
+[FlakeLab Actual Budget demo](https://github.com/kelvinguchu/flakelab-actual-budget-demo).
+It is an explicitly labelled, intentionally timing-sensitive fork of Actual Budget with a
+meaningful onboarding test and a fixable application-source defect. Its
+[walkthrough](https://github.com/kelvinguchu/flakelab-actual-budget-demo/blob/main/packages/docs/docs/contributing/flakelab-demo.md)
+covers cloning, installation, the Windows and macOS/Linux terminal setup, provider credentials,
+diagnosis, candidate generation, and Solari proof.
+
 The default command starts one Playwright process and uses Playwright's native `--repeat-each`
 and JSON reporter to classify every selected test as `no-failure-observed`, `mixed-outcomes`,
 `failed-every-run`, `skipped`, or `errored`. These labels describe only the bounded sample; they
